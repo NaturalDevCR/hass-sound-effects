@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Release gate. Runs from the repository root; never contacts Home Assistant.
+set -euo pipefail
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+uv run ruff format --check .
+uv run ruff check .
+uv run pyright
+uv run pytest -q
+
+for translation in custom_components/sound_effects/translations/*.json; do
+    [ -e "$translation" ] || continue
+    uv run python -m json.tool "$translation" >/dev/null
+done
+
+if [ -f app/ui/package.json ] && command -v npm >/dev/null 2>&1; then
+    npm --prefix app/ui ci
+    npm --prefix app/ui run test:unit
+    npm --prefix app/ui run build
+else
+    echo "Skipped UI tests/build (no npm or no UI yet)." >&2
+fi
+
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker build --build-arg BUILD_ARCH=amd64 --file app/Dockerfile --tag sound-effects-studio:verify app
+else
+    echo "Skipped Docker build (daemon unavailable); CI builds the image." >&2
+fi
