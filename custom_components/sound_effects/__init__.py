@@ -1,0 +1,1 @@
+"""The Sound Effects integration."""
