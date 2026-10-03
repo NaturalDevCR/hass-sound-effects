@@ -176,7 +176,18 @@ def test_selected_at_is_normalized_to_utc(raw: str, expected: str) -> None:
     assert event.selected_at == expected
 
 
-@pytest.mark.parametrize("raw", ["", "t", "yesterday", "2026-13-01T00:00:00Z", "12:00:00Z"])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        "t",
+        "yesterday",
+        "2026-13-01T00:00:00Z",
+        "12:00:00Z",
+        "0001-01-01T00:00:00+05:00",
+        "9999-12-31T23:59:59-05:00",
+    ],
+)
 def test_selected_at_rejects_non_timestamps(raw: str) -> None:
     with pytest.raises(ValidationError):
         SelectionEvent(sound_id="a", category_id="b", season_id="regular", selected_at=raw)

@@ -50,7 +50,10 @@ def _normalize_timestamp(value: str) -> str:
     except ValueError:
         raise ValueError("must be an ISO-8601 timestamp") from None
     if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(UTC)
+        try:
+            parsed = parsed.astimezone(UTC)
+        except OverflowError:
+            raise ValueError("timestamp out of range") from None
     return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
