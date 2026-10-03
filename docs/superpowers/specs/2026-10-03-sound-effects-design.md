@@ -193,8 +193,9 @@ the published catalog.
   Supervisor Ingress proxy (`172.30.32.2`). A development flag
   (`SOUND_EFFECTS_DEV=1`) disables the check for local work.
 - Integration API `/api/v1/*`: `Authorization: Bearer <api_token>`, compared
-  with `hmac.compare_digest`. The SPA never receives the token in full; the UI
-  shows it masked with copy and rotate actions.
+  with `hmac.compare_digest`. `GET /api/ui/state` only carries the masked
+  token; the full token is returned by `GET /api/ui/token` when the user
+  explicitly reveals or copies it (Ingress panels are admin-only).
 
 ### Discovery
 
