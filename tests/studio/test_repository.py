@@ -1,3 +1,4 @@
+import sqlite3
 import threading
 from collections.abc import Iterator
 
@@ -174,19 +175,20 @@ def test_revision_not_bumped_by_selections_profiles_settings_and_transient_state
 
 def test_on_catalog_change_runs_after_commit(paths: Paths) -> None:
     db = Database(paths.database_path)
-    observed: list[tuple[int, int]] = []
+    # A second connection: in WAL mode it only ever sees committed data.
+    observer = sqlite3.connect(paths.database_path)
+    observed: list[tuple[int, int, bool]] = []
 
     def on_change(revision: int) -> None:
-        stored = db.connection.execute(
-            "SELECT value FROM meta WHERE key = 'catalog_revision'"
-        ).fetchone()
-        observed.append((revision, int(stored["value"])))
-        assert not db.connection.in_transaction
+        stored = observer.execute("SELECT value FROM meta WHERE key = 'catalog_revision'")
+        observed.append((revision, int(stored.fetchone()[0]), db.connection.in_transaction))
 
     repo = Repository(db, on_change)
     repo.create_category(CategoryCreate(name="Doors"))
     repo.create_season(SeasonCreate(name="Spring", start="03-20", end="06-20"))
-    assert observed == [(1, 1), (2, 2)]
+    # (revision passed, revision committed and visible to another connection, still in a tx)
+    assert observed == [(1, 1, False), (2, 2, False)]
+    observer.close()
     db.close()
 
 
@@ -561,6 +563,46 @@ def test_bulk_update_is_atomic(repo: Repository) -> None:
     with pytest.raises(InvalidError):
         repo.bulk_update([first.id], BulkSet(category_id="missing", add_tags=["b"]))
     assert repo.get_sound(first.id).tags == ["a"]
+    assert repo.catalog_revision() == revision
+
+
+def test_bulk_update_rolls_back_when_a_later_sound_fails(repo: Repository) -> None:
+    seen: list[int] = []
+    first = make_sound(repo, title="First", seasons=["regular"])
+    # Turning all_seasons off is fine for the first sound but leaves the second without seasons.
+    second = make_sound(repo, title="Second", seasons=[], all_seasons=True)
+    before = (repo.get_sound(first.id), repo.get_sound(second.id), repo.catalog_revision())
+    repo._on_catalog_change = seen.append  # type: ignore[attr-defined]
+    with pytest.raises(InvalidError):
+        repo.bulk_update([first.id, second.id], BulkSet(all_seasons=False, enabled=False))
+    assert (repo.get_sound(first.id), repo.get_sound(second.id), repo.catalog_revision()) == before
+    assert repo.get_sound(first.id).enabled is True
+    assert seen == []
+
+
+def test_bulk_update_without_effective_change_does_not_write(repo: Repository) -> None:
+    seen: list[int] = []
+    first = make_sound(repo, tags=["es"])
+    second = make_sound(repo, tags=["es", "en"])
+    before = [repo.get_sound(first.id), repo.get_sound(second.id)]
+    revision = repo.catalog_revision()
+    repo._on_catalog_change = seen.append  # type: ignore[attr-defined]
+    # Blank tags, a tag already present, a tag that is not there and an unchanged flag.
+    result = repo.bulk_update(
+        [first.id, second.id],
+        BulkSet(add_tags=[" ", "es"], remove_tags=["", "missing"], enabled=True),
+    )
+    assert result == 2
+    assert [repo.get_sound(first.id), repo.get_sound(second.id)] == before
+    assert repo.catalog_revision() == revision
+    assert seen == []
+
+
+def test_update_sound_without_effective_change_does_not_bump(repo: Repository) -> None:
+    sound = make_sound(repo, title="Boo")
+    revision = repo.catalog_revision()
+    assert repo.update_sound(sound.id, SoundUpdate(title=" Boo ", enabled=True)) == sound
+    assert repo.update_sound(sound.id, SoundUpdate()) == sound
     assert repo.catalog_revision() == revision
 
 

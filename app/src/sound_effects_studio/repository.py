@@ -228,14 +228,29 @@ def _update_sound_fields(
     enabled: bool | None = None,
     notes: str | None = None,
 ) -> None:
-    """Apply the given metadata (None means unchanged) after validating the result."""
+    """Apply the given metadata (None means unchanged) after validating the result.
+
+    Nothing is written when the result equals the sound as it is.
+    """
     new_title = _clean_text("title", title) if title is not None else sound.title
     new_key = _clean_text("key", key) if key is not None else sound.key
     new_category = category_id if category_id is not None else sound.category_id
     new_tags = _normalize_tags(tags) if tags is not None else sound.tags
     new_seasons = _dedupe(seasons) if seasons is not None else sound.seasons
     new_all_seasons = all_seasons if all_seasons is not None else sound.all_seasons
+    new_enabled = enabled if enabled is not None else sound.enabled
+    new_notes = notes if notes is not None else sound.notes
     _check_placement(conn, new_category, new_seasons, new_all_seasons)
+    unchanged = (new_title, new_key, new_category, new_tags, new_seasons, new_all_seasons) == (
+        sound.title,
+        sound.key,
+        sound.category_id,
+        sound.tags,
+        sound.seasons,
+        sound.all_seasons,
+    ) and (new_enabled, new_notes) == (sound.enabled, sound.notes)
+    if unchanged:
+        return
     conn.execute(
         "UPDATE sounds SET title = ?, key = ?, category_id = ?, tags = ?, seasons = ?,"
         " all_seasons = ?, enabled = ?, notes = ?, updated_at = ? WHERE id = ?",
@@ -246,8 +261,8 @@ def _update_sound_fields(
             _dumps(new_tags),
             _dumps(new_seasons),
             int(new_all_seasons),
-            int(enabled if enabled is not None else sound.enabled),
-            notes if notes is not None else sound.notes,
+            int(new_enabled),
+            new_notes,
             utcnow_iso(),
             sound.id,
         ),
@@ -281,11 +296,15 @@ class Repository:
 
     @contextmanager
     def _write(self, *, bump: bool = True) -> Generator[sqlite3.Connection]:
-        """Run a write transaction; bump the catalog revision and notify after the commit."""
+        """Run a write transaction; bump the catalog revision and notify after the commit.
+
+        The bump is skipped when the block modified no rows (a no-op update).
+        """
         revision: int | None = None
         with self._db.transaction() as conn:
+            changes_before = conn.total_changes
             yield conn
-            if bump:
+            if bump and conn.total_changes != changes_before:
                 revision = _increment_revision(conn)
         if revision is not None and self._on_catalog_change is not None:
             try:
@@ -620,39 +639,25 @@ class Repository:
             conn.execute("DELETE FROM sounds WHERE id = ?", (sound_id,))
 
     def bulk_update(self, ids: list[str], data: BulkSet) -> int:
-        """Apply metadata changes to many sounds at once; returns how many were updated.
+        """Apply metadata changes to many sounds at once; returns how many sounds matched.
 
-        Unknown ids are skipped. The whole batch is validated and applied atomically. The
-        recipe profile (``data.profile_id``) is handled by the API layer, not here.
+        Unknown ids are skipped. The whole batch is validated and applied atomically, and
+        nothing is written (or bumped) when no sound would actually change. The recipe
+        profile (``data.profile_id``) is handled by the API layer, not here.
         """
-        has_changes = (
-            any(
-                value is not None
-                for value in (data.category_id, data.seasons, data.all_seasons, data.enabled)
-            )
-            or bool(data.add_tags)
-            or bool(data.remove_tags)
-        )
-        with self._read() as conn:
-            existing = [
-                sound_id
-                for sound_id in _dedupe(ids)
-                if conn.execute("SELECT 1 FROM sounds WHERE id = ?", (sound_id,)).fetchone()
-            ]
-        if not existing or not has_changes:
-            return len(existing)
-        added = data.add_tags or []
+        added = _normalize_tags(data.add_tags or [])
         removed = set(_normalize_tags(data.remove_tags or []))
         with self._write() as conn:
-            updated = 0
-            for sound_id in existing:
+            matched = 0
+            for sound_id in _dedupe(ids):
                 row = conn.execute("SELECT * FROM sounds WHERE id = ?", (sound_id,)).fetchone()
                 if row is None:
                     continue
+                matched += 1
                 sound = _sound_from_row(row)
                 tags: list[str] | None = None
                 if added or removed:
-                    tags = [t for t in _normalize_tags([*sound.tags, *added]) if t not in removed]
+                    tags = [tag for tag in {*sound.tags, *added} if tag not in removed]
                 _update_sound_fields(
                     conn,
                     sound,
@@ -662,8 +667,7 @@ class Repository:
                     enabled=data.enabled,
                     tags=tags,
                 )
-                updated += 1
-            return updated
+            return matched
 
     def record_selections(self, events: list[SelectionEvent]) -> None:
         """Count selections reported by the integration; events for deleted sounds are dropped."""

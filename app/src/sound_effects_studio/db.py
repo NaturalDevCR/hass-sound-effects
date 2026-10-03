@@ -58,10 +58,14 @@ class Database:
         self.lock = threading.RLock()
         # Autocommit mode: transactions are explicit (see ``transaction``).
         self.connection = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
-        self.connection.row_factory = sqlite3.Row
-        self.connection.execute("PRAGMA journal_mode = WAL")
-        self.connection.execute("PRAGMA foreign_keys = ON")
-        self._initialise()
+        try:
+            self.connection.row_factory = sqlite3.Row
+            self.connection.execute("PRAGMA journal_mode = WAL")
+            self.connection.execute("PRAGMA foreign_keys = ON")
+            self._initialise()
+        except BaseException:
+            self.connection.close()
+            raise
 
     @contextmanager
     def transaction(self) -> Generator[sqlite3.Connection]:
@@ -83,11 +87,16 @@ class Database:
     def _initialise(self) -> None:
         with self.transaction() as conn:
             version: int = conn.execute("PRAGMA user_version").fetchone()[0]
+            if version > SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"The database schema version ({version}) is newer than this app supports"
+                    f" ({SCHEMA_VERSION}); refusing to open it."
+                )
             for statement in _SCHEMA:
                 conn.execute(statement)
-            if version < 1:
+            if version == 0:
                 _seed(conn)
-            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
 def _seed(conn: sqlite3.Connection) -> None:

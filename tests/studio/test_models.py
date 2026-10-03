@@ -11,6 +11,7 @@ from sound_effects_studio.models import (
     Published,
     Recipe,
     SeasonCreate,
+    SeasonUpdate,
     SelectionBatch,
     SelectionEvent,
     Settings,
@@ -57,7 +58,12 @@ def test_recipe_ranges() -> None:
 
 
 def test_selection_batch_limit() -> None:
-    event = {"sound_id": "a", "category_id": "b", "season_id": "regular", "selected_at": "t"}
+    event = {
+        "sound_id": "a",
+        "category_id": "b",
+        "season_id": "regular",
+        "selected_at": "2026-10-03T12:00:00Z",
+    }
     assert len(SelectionBatch.model_validate({"events": [event] * 500}).events) == 500
     with pytest.raises(ValidationError):
         SelectionBatch.model_validate({"events": [event] * 501})
@@ -142,3 +148,35 @@ def test_json_shapes_match_shared_api() -> None:
         "media_base_url",
     }
     assert set(AuditionTarget.model_fields) == {"id", "label", "kind", "entity_id", "volume"}
+
+
+def test_season_priority_is_bounded() -> None:
+    for priority in (1001, -1001, 10**30):
+        with pytest.raises(ValidationError):
+            SeasonCreate(name="x", start="01-01", end="01-02", priority=priority)
+        with pytest.raises(ValidationError):
+            SeasonUpdate(priority=priority)
+    assert SeasonCreate(name="x", start="01-01", end="01-02", priority=-1000).priority == -1000
+    assert SeasonUpdate(priority=1000).priority == 1000
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("2026-10-03T12:00:00Z", "2026-10-03T12:00:00Z"),
+        ("2026-10-03T12:00:00z", "2026-10-03T12:00:00Z"),
+        ("2026-10-03T12:00:00.987Z", "2026-10-03T12:00:00Z"),
+        ("2026-10-03T14:30:00+02:00", "2026-10-03T12:30:00Z"),
+        ("2026-10-03T12:00:00+00:00", "2026-10-03T12:00:00Z"),
+        ("2026-10-03T12:00:00", "2026-10-03T12:00:00Z"),
+    ],
+)
+def test_selected_at_is_normalized_to_utc(raw: str, expected: str) -> None:
+    event = SelectionEvent(sound_id="a", category_id="b", season_id="regular", selected_at=raw)
+    assert event.selected_at == expected
+
+
+@pytest.mark.parametrize("raw", ["", "t", "yesterday", "2026-13-01T00:00:00Z", "12:00:00Z"])
+def test_selected_at_rejects_non_timestamps(raw: str) -> None:
+    with pytest.raises(ValidationError):
+        SelectionEvent(sound_id="a", category_id="b", season_id="regular", selected_at=raw)

@@ -11,7 +11,7 @@ import unicodedata
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .errors import InvalidError
 
@@ -24,6 +24,8 @@ _SLUG_MAX_LENGTH = 48
 _TRIM_END_TOLERANCE_S = 0.05
 # Slack for float rounding when comparing fade lengths against the clip length.
 _FADE_TOLERANCE_S = 1e-6
+# Keeps season priorities well inside SQLite's INTEGER range.
+_PRIORITY_LIMIT = 1000
 
 
 def slugify(text: str) -> str:
@@ -36,6 +38,20 @@ def slugify(text: str) -> str:
 def utcnow_iso() -> str:
     """Current UTC time as ``2026-10-03T12:00:00Z``."""
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _normalize_timestamp(value: str) -> str:
+    """Parse an ISO-8601 timestamp (naive means UTC) and return it as ``YYYY-MM-DDTHH:MM:SSZ``."""
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        raise ValueError("must be an ISO-8601 timestamp") from None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(UTC)
+    return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # --- seasons ---------------------------------------------------------------------------------
@@ -61,7 +77,7 @@ class SeasonCreate(BaseModel):
     icon: str = "mdi:calendar-star"
     start: str
     end: str
-    priority: int = 0
+    priority: int = Field(default=0, ge=-_PRIORITY_LIMIT, le=_PRIORITY_LIMIT)
 
 
 class SeasonUpdate(BaseModel):
@@ -72,7 +88,7 @@ class SeasonUpdate(BaseModel):
     icon: str | None = None
     start: str | None = None
     end: str | None = None
-    priority: int | None = None
+    priority: int | None = Field(default=None, ge=-_PRIORITY_LIMIT, le=_PRIORITY_LIMIT)
 
 
 # --- categories ------------------------------------------------------------------------------
@@ -280,6 +296,11 @@ class SelectionEvent(BaseModel):
     category_id: str
     season_id: str
     selected_at: str
+
+    @field_validator("selected_at")
+    @classmethod
+    def _normalize_selected_at(cls, value: str) -> str:
+        return _normalize_timestamp(value)
 
 
 class SelectionBatch(BaseModel):
