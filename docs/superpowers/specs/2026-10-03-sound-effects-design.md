@@ -22,6 +22,8 @@ window) is delicate, proven, and must not change.
 
 - Upload, organize, trim, level, normalize, fade, and audition sounds from a
   responsive, mobile-first web UI inside Home Assistant.
+- Make sounds play at a consistent perceived loudness through named
+  normalization profiles applied per sound, per category, or in bulk.
 - Categorize sounds and assign them to seasons with yearly date ranges.
 - Replace hardcoded catalogs with one action call that returns a playable URL
   and a measured duration, with shuffle history that has no size limit.
@@ -115,9 +117,18 @@ Data flow:
   (higher wins when ranges overlap). The built-in `regular` season has no
   range, cannot be deleted, and is the fallback.
 
+`NormalizationProfile`
+: `id` (slug, immutable), `name`, `target_lufs` (−30…−5), `true_peak`
+  (−9…0 dBTP), `lra` (1…20). Built-in, editable, deletable defaults:
+  `standard` "Standard" (−16 LUFS, −1.5 dBTP, LRA 11), `loud` "Loud"
+  (−13, −1.0, 11), `soft` "Soft" (−20, −1.5, 11), `voice` "Voice /
+  announcement" (−18, −1.5, 7). A profile in use by any recipe or category
+  cannot be deleted.
+
 `Category`
 : `id` (slug, immutable), `name`, `icon`, `color`, `description`,
-  `sort_order`.
+  `sort_order`, `default_profile_id` (nullable; applied to new uploads and
+  imports into this category).
 
 `Sound`
 : `id` (12-character random id), `category_id`, `title`, `key` (stable legacy
@@ -133,8 +144,9 @@ New uploads default to `seasons: [regular]`, `enabled: true`.
 
 `Recipe`
 : `trim_start` (s, ≥ 0), `trim_end` (s or null for end of file), `gain_db`
-  (−24…+24), `fade_in` and `fade_out` (s, ≥ 0), `normalize` (bool). The
-  identity recipe is `{0, null, 0, 0, 0, false}`.
+  (−24…+24, applied after normalization as a deliberate offset), `fade_in`
+  and `fade_out` (s, ≥ 0), `profile_id` (normalization profile or null for
+  none). The identity recipe is `{0, null, 0, 0, 0, null}`.
 
 `status`
 : `processing` (import analysis or first render), `ready` (published, playable),
@@ -147,10 +159,12 @@ the published catalog.
 
 ### Settings (stored in SQLite, edited in the UI)
 
-- `normalize_target_lufs` (default −16), `normalize_true_peak` (default −1.5).
 - `max_upload_mb` (default 100), `max_duration_s` (default 600).
 - `audition_targets`: list of `{id, label, kind: media_player|script, entity_id, volume?}`.
-- `public_base_url_hint`: informational; the integration decides URLs.
+- `media_base_url`: base URL speakers use to fetch files during auditions.
+  Auto-detected on start from the Core config `internal_url`, else from the
+  Supervisor primary interface IPv4 and the Core port; overridable in the UI.
+  The integration computes its own URLs independently.
 
 ### Rendering
 
@@ -161,9 +175,11 @@ the published catalog.
 - Import with an identity recipe and an mp3 input publishes a byte-identical
   copy (no re-encode). Otherwise output is MP3 (`libmp3lame -q:a 2`), 44.1 kHz,
   source channel count capped at 2.
-- Filter chain order: `atrim` → `loudnorm` (two-pass: measure, then apply with
-  `linear=true`, targets from settings) → `volume=<gain_db>dB` → `afade` in/out
-  → `alimiter` at the true-peak ceiling when `gain_db > 0` or `normalize`.
+- Filter chain order: `atrim` → `loudnorm` (two-pass: measure the trimmed
+  audio, then apply with `linear=true` and the measured values, targets from
+  the recipe's profile) → `volume=<gain_db>dB` → `afade` in/out → `alimiter`
+  at the true-peak ceiling (profile `true_peak`, or −1 dBTP without a
+  profile) when `gain_db > 0` or a profile is set.
 - After render: ffprobe duration, ebur128 integrated loudness and true peak.
 - Publish: write to a temp file in the destination directory, validate with
   ffprobe, `os.replace` into the final name, then update the database and
@@ -206,6 +222,12 @@ the System view; manual configuration remains fully supported.
   sounds reference the category; deleting a season removes it from sounds,
   and sounds left without seasons fall back to `regular`).
 - `GET /seasons/resolve?date=YYYY-MM-DD` → the season the calendar picks.
+- Normalization profiles: list, create, update, delete.
+  `POST /profiles/{id}/apply` with `{sound_ids[]}` or `{category_id}` sets
+  `recipe.profile_id` on those sounds and queues their renders.
+  `POST /sounds/bulk` accepts `profile_id` too (null removes normalization).
+  Updating a profile's targets returns the affected sound count; the UI then
+  offers "re-render N sounds" which calls `apply` for them.
 - Sounds: list, get, patch metadata, put recipe (queues render + publish),
   post preview (queues preview render), delete, bulk update
   (`{ids, set: {category_id?, seasons?, all_seasons?, add_tags?, remove_tags?, enabled?}}`),
@@ -312,26 +334,32 @@ Navigation: bottom tab bar on phones, left sidebar from `md` up.
 1. **Library** (home) — horizontally scrollable category chips with counts,
    season and tag filters, search. Sounds as list rows on phones and cards on
    desktop: large play/pause (browser preview of the published file), title,
-   duration, season badges, tags, status pill. Long-press or checkbox enters
+   duration, season badges, tags, status pill, integrated loudness (LUFS)
+   with a profile marker. A per-category loudness strip shows the spread
+   (min…max LUFS) and offers "Level this category" (pick a profile → apply to
+   all its sounds). Long-press or checkbox enters
    multi-select with a bulk bar (category, seasons, tags, enable/disable,
    delete with confirmation). Floating "Upload" button on phones.
 2. **Editor** — full-screen sheet on phones, side drawer on desktop.
    Waveform with a draggable trim region (touch-sized handles) and numeric
    trim fields; transport (play, loop region, A/B original vs edited); gain
    slider in dB with live WebAudio preview; fade in/out with live preview;
-   normalize toggle (live preview not possible → "Preview render" button
-   renders and plays the exact result); loudness and true-peak readout of the
+   normalization profile picker (live preview not possible → "Preview
+   render" button renders and plays the exact result); loudness and true-peak readout of the
    published revision; metadata (title, category, seasons or "all", tags,
    enabled, notes); "Test on speaker" with target picker showing destination
    and volume; primary "Save & publish". Unsaved-changes guard.
 3. **Upload** — drop zone and file picker (multiple), per-batch defaults
-   (category, seasons, tags, normalize on import), per-file progress and
+   (category, seasons, tags, normalization profile defaulting to the
+   category's), per-file progress and
    errors, links to edit each result.
-4. **Organize** — categories and seasons CRUD with color/icon pickers; season
-   timeline for the year with a date probe ("on Oct 31 the season is…").
+4. **Organize** — categories (with default profile), seasons, and
+   normalization profiles CRUD with color/icon pickers; season timeline for
+   the year with a date probe ("on Oct 31 the season is…"); profile edits
+   offer to re-render affected sounds.
 5. **System** — connection (masked token, copy, rotate, discovery status),
    `/config/www` status, import browser for existing folders, audition
-   targets, normalization settings, storage usage, recent jobs.
+   targets, media base URL, storage usage, recent jobs.
 
 Live job progress appears in a persistent bottom drawer/toast stack.
 Empty states explain the next action. All destructive actions confirm.
@@ -352,7 +380,9 @@ Empty states explain the next action. All destructive actions confirm.
 
 - **App** (pytest, real ffmpeg; fixtures generated with `lavfi` sine tones):
   recipe → filter graph, identity copy is byte-identical, trim/fade durations,
-  normalization lands within ±1 LU, atomic publish keeps the previous file on
+  normalization lands within ±1 LU of each profile target (two fixtures at
+  different loudness end within 1 LU of each other), profile apply/bulk
+  queues renders, profile in use cannot be deleted, atomic publish keeps the previous file on
   failure, revision cleanup, chunked upload assembly, import path traversal
   rejection, Ingress-IP vs bearer authorization, catalog ETag, season calendar.
 - **Integration** (pytest-homeassistant-custom-component): shuffle bag
@@ -385,8 +415,9 @@ user:
 2. Create seasons Regular / Halloween / Christmas from the existing
    `input_datetime` ranges; create categories for entrance intros, lion
    effects, and bathroom announcements.
-3. Import the existing files as byte-identical copies, keeping their filenames
-   as `key`; tag bathroom announcements `es`/`en`.
+3. Import the existing files as byte-identical copies (no profile), keeping
+   their filenames as `key`; tag bathroom announcements `es`/`en`. Leveling
+   with a profile is a later, opt-in step the user takes in the UI.
 4. For each flow (bathrooms → intros → lion): create a disabled copy whose
    only change is replacing the hardcoded catalog/history variables with a
    `sound_effects.select` call (with `continue_on_error` and a fallback to
