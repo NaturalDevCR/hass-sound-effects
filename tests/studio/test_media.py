@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import shutil
+import subprocess
+import time
+
 import pytest
+import sound_effects_studio.media as media
 from sound_effects_studio.media import (
     LoudnessMeasurement,
     MediaError,
@@ -16,6 +22,23 @@ from sound_effects_studio.models import Profile, Recipe
 pytestmark = pytest.mark.studio
 
 STANDARD = Profile(id="standard", name="Standard", target_lufs=-16, true_peak=-1.5, lra=11)
+
+
+def use_realtime_ffmpeg(tmp_path, monkeypatch):
+    """Use ffmpeg's real-time input mode to keep subprocess cleanup tests deterministic."""
+    executable = shutil.which("ffmpeg")
+    assert executable is not None
+    wrapper = tmp_path / "ffmpeg-realtime"
+    wrapper.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, sys\n"
+        f"ffmpeg = {executable!r}\n"
+        "args = sys.argv[1:]\n"
+        "index = args.index('-i')\n"
+        "os.execv(ffmpeg, [ffmpeg, *args[:index], '-re', *args[index:]])\n"
+    )
+    wrapper.chmod(0o755)
+    monkeypatch.setattr(media, "FFMPEG", str(wrapper))
 
 
 async def test_probe_wav(make_tone):
@@ -117,3 +140,79 @@ async def test_render_reports_progress(make_tone, tmp_path):
         src, dst, recipe=Recipe(), duration=2, channels=2, profile=None, on_progress=progress.append
     )
     assert progress and progress[-1] >= 0.9
+
+
+async def test_render_timeout_removes_partial_output(make_tone, tmp_path, monkeypatch):
+    use_realtime_ffmpeg(tmp_path, monkeypatch)
+    src, dst = make_tone(seconds=4), tmp_path / "timeout.mp3"
+    started = time.monotonic()
+    with pytest.raises(MediaError, match="render timed out"):
+        await render(src, dst, recipe=Recipe(), duration=4, channels=2, profile=None, timeout=0.05)
+    assert time.monotonic() - started < 2
+    assert not dst.exists()
+
+
+async def test_render_cancellation_removes_partial_output(make_tone, tmp_path, monkeypatch):
+    use_realtime_ffmpeg(tmp_path, monkeypatch)
+    src, dst = make_tone(seconds=5), tmp_path / "cancelled.mp3"
+    task = asyncio.create_task(
+        render(src, dst, recipe=Recipe(), duration=5, channels=2, profile=None)
+    )
+    await asyncio.sleep(0.2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not dst.exists()
+
+
+async def test_render_ignores_progress_callback_exception(make_tone, tmp_path):
+    src, dst = make_tone(seconds=2), tmp_path / "callback.mp3"
+
+    def fail_callback(_progress: float) -> None:
+        raise RuntimeError("callback failed")
+
+    await render(
+        src,
+        dst,
+        recipe=Recipe(),
+        duration=2,
+        channels=2,
+        profile=None,
+        on_progress=fail_callback,
+    )
+    assert dst.exists()
+    assert (await probe(dst)).codec == "mp3"
+
+
+async def test_measure_loudness_silence_returns_finite_fallback(tmp_path):
+    src = tmp_path / "silence.wav"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=44100:cl=stereo:d=2",
+            "-y",
+            str(src),
+        ],
+        check=True,
+    )
+    result = await measure_loudness(src)
+    assert result.input_i == -70.0
+
+
+async def test_probe_uses_audio_stream_duration_when_format_duration_missing(monkeypatch, tmp_path):
+    async def fake_run(*_args, **_kwargs):
+        return (
+            0,
+            b'{"format":{"format_name":"wav"},"streams":[{"codec_type":"audio",'
+            b'"codec_name":"pcm_s16le","sample_rate":"44100","channels":2,"duration":"2.5"}]}',
+            b"",
+        )
+
+    monkeypatch.setattr(media, "_run", fake_run)
+    assert (await probe(tmp_path / "audio.wav")).duration == 2.5

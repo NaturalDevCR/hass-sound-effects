@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import os
-from collections import deque
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,8 @@ FFPROBE = os.environ.get("SOUND_EFFECTS_FFPROBE", "ffprobe")
 SUPPORTED_EXTENSIONS = frozenset(
     {".mp3", ".wav", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".webm", ".mp4", ".mov"}
 )
+_LOG = logging.getLogger(__name__)
+_STDERR_LIMIT = 8192
 
 
 class MediaError(Exception):
@@ -42,18 +45,58 @@ class LoudnessMeasurement:
     target_offset: float
 
 
-async def _run(*args: str) -> tuple[int, bytes, bytes]:
+async def _run(
+    *args: str,
+    timeout: float | None = None,
+    timeout_message: str = "subprocess timed out",
+) -> tuple[int, bytes, bytes]:
     try:
         proc = await asyncio.create_subprocess_exec(
-            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *args,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
     except OSError as exc:
         raise MediaError(f"could not run {args[0]}: {exc}") from exc
-    return proc.returncode or 0, stdout, stderr
+    assert proc.stdout is not None and proc.stderr is not None
+    stdout_pipe, stderr_pipe = proc.stdout, proc.stderr
+    stderr_tail = bytearray()
+
+    async def read_stdout() -> bytes:
+        return await stdout_pipe.read()
+
+    async def read_stderr() -> None:
+        while chunk := await stderr_pipe.read(4096):
+            stderr_tail.extend(chunk)
+            if len(stderr_tail) > _STDERR_LIMIT:
+                del stderr_tail[:-_STDERR_LIMIT]
+
+    stdout_task = asyncio.create_task(read_stdout())
+    stderr_task = asyncio.create_task(read_stderr())
+    try:
+        if timeout is None:
+            await proc.wait()
+        else:
+            try:
+                await asyncio.wait_for(proc.wait(), timeout)
+            except TimeoutError as exc:
+                raise MediaError(timeout_message) from exc
+        stdout = await stdout_task
+        await stderr_task
+        return proc.returncode or 0, stdout, bytes(stderr_tail)
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+        for task in (stdout_task, stderr_task):
+            if not task.done():
+                task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
 
-async def probe(path: Path) -> ProbeResult:
+async def probe(path: Path, *, timeout: float | None = 30.0) -> ProbeResult:
     code, stdout, stderr = await _run(
         FFPROBE,
         "-v",
@@ -63,6 +106,8 @@ async def probe(path: Path) -> ProbeResult:
         "-of",
         "json",
         str(path),
+        timeout=timeout,
+        timeout_message="probe timed out",
     )
     if code:
         raise MediaError(stderr.decode(errors="replace")[-2000:] or "ffprobe failed")
@@ -70,10 +115,13 @@ async def probe(path: Path) -> ProbeResult:
         data = json.loads(stdout)
         stream = next(s for s in data["streams"] if s.get("codec_type") == "audio")
         fmt = data["format"]
+        duration = fmt.get("duration")
+        if duration is None:
+            duration = stream.get("duration")
         return ProbeResult(
             format=fmt["format_name"].split(",", 1)[0],
             codec=stream["codec_name"],
-            duration=float(fmt["duration"]),
+            duration=float(duration),
             sample_rate=int(stream["sample_rate"]),
             channels=int(stream["channels"]),
         )
@@ -102,24 +150,41 @@ async def measure_loudness(
     trim_start: float = 0.0,
     trim_end: float | None = None,
     profile: Profile | None = None,
+    timeout: float | None = None,
 ) -> LoudnessMeasurement:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout if timeout is not None else None
+
+    def remaining() -> float | None:
+        return max(0.0, deadline - loop.time()) if deadline is not None else None
+
     target_i, target_tp, target_lra = (
         (profile.target_lufs, profile.true_peak, profile.lra) if profile else (-16.0, -1.5, 11.0)
     )
-    duration = (await probe(path)).duration
+    try:
+        duration = (await probe(path, timeout=remaining())).duration
+    except MediaError as exc:
+        if str(exc) == "probe timed out":
+            raise MediaError("loudness measurement timed out") from exc
+        raise
     filters = _trim_filters(trim_start, trim_end, duration)
     filters.append(f"loudnorm=I={target_i:g}:TP={target_tp:g}:LRA={target_lra:g}:print_format=json")
     code, _, stderr = await _run(
         FFMPEG,
         "-hide_banner",
         "-nostats",
+        "-nostdin",
         "-i",
         str(path),
+        "-map",
+        "0:a:0",
         "-af",
         ",".join(filters),
         "-f",
         "null",
         "-",
+        timeout=remaining(),
+        timeout_message="loudness measurement timed out",
     )
     text = stderr.decode(errors="replace")
     start, end = text.rfind("{"), text.rfind("}")
@@ -186,67 +251,108 @@ async def render(
     on_progress: Callable[[float], None] | None = None,
     timeout: float | None = None,
 ) -> None:
-    measured = None
-    if profile:
-        measured = await measure_loudness(
-            src, trim_start=recipe.trim_start, trim_end=recipe.trim_end, profile=profile
-        )
-    chain = build_filter_chain(recipe, duration, profile, measured)
-    clip = (recipe.trim_end if recipe.trim_end is not None else duration) - recipe.trim_start
-    args = [FFMPEG, "-hide_banner", "-nostats", "-y", "-i", str(src), "-vn", "-map", "0:a:0"]
-    if chain:
-        args.extend(["-af", ",".join(chain)])
-    args.extend(
-        [
-            "-ac",
-            str(min(channels, 2)),
-            "-ar",
-            "44100",
-            "-c:a",
-            "libmp3lame",
-            "-q:a",
-            "2",
-            "-progress",
-            "pipe:1",
-            str(dst),
+    loop = asyncio.get_running_loop()
+    budget = timeout if timeout is not None else max(60, 4 * duration)
+    deadline = loop.time() + budget
+
+    def remaining() -> float:
+        return max(0.0, deadline - loop.time())
+
+    try:
+        measured = None
+        if profile:
+            measured = await measure_loudness(
+                src,
+                trim_start=recipe.trim_start,
+                trim_end=recipe.trim_end,
+                profile=profile,
+                timeout=remaining(),
+            )
+        chain = build_filter_chain(recipe, duration, profile, measured)
+        clip = (recipe.trim_end if recipe.trim_end is not None else duration) - recipe.trim_start
+        args = [
+            FFMPEG,
+            "-hide_banner",
+            "-nostats",
+            "-nostdin",
+            "-y",
+            "-i",
+            str(src),
+            "-vn",
+            "-map",
+            "0:a:0",
         ]
-    )
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        if chain:
+            args.extend(["-af", ",".join(chain)])
+        args.extend(
+            [
+                "-ac",
+                str(min(channels, 2)),
+                "-ar",
+                "44100",
+                "-c:a",
+                "libmp3lame",
+                "-q:a",
+                "2",
+                "-progress",
+                "pipe:1",
+                str(dst),
+            ]
         )
-    except OSError as exc:
-        raise MediaError(f"could not run ffmpeg: {exc}") from exc
-    stderr_tail: deque[bytes] = deque(maxlen=80)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except OSError as exc:
+            raise MediaError(f"could not run ffmpeg: {exc}") from exc
+        assert proc.stdout is not None and proc.stderr is not None
+        stdout_pipe, stderr_pipe = proc.stdout, proc.stderr
+        stderr_tail = bytearray()
 
-    async def read_stderr() -> None:
-        assert proc.stderr is not None
-        while chunk := await proc.stderr.readline():
-            stderr_tail.append(chunk)
+        async def read_stderr() -> None:
+            while chunk := await stderr_pipe.read(4096):
+                stderr_tail.extend(chunk)
+                if len(stderr_tail) > _STDERR_LIMIT:
+                    del stderr_tail[:-_STDERR_LIMIT]
 
-    async def consume() -> int:
-        assert proc.stdout is not None
+        async def read_progress() -> None:
+            async for raw in stdout_pipe:
+                line = raw.decode(errors="replace").strip()
+                if line.startswith("out_time_ms=") and on_progress is not None:
+                    try:
+                        value = float(line.split("=", 1)[1]) / 1_000_000 / clip
+                        on_progress(min(1.0, max(0.0, value)))
+                    except (ValueError, ZeroDivisionError):
+                        pass
+                    except Exception:
+                        _LOG.debug(
+                            "Ignoring exception from render progress callback", exc_info=True
+                        )
+
         stderr_task = asyncio.create_task(read_stderr())
-        async for raw in proc.stdout:
-            line = raw.decode(errors="replace").strip()
-            if line.startswith("out_time_ms=") and on_progress is not None:
-                try:
-                    value = float(line.split("=", 1)[1]) / 1_000_000 / clip
-                    on_progress(min(1.0, max(0.0, value)))
-                except (ValueError, ZeroDivisionError):
-                    pass
-        result = await proc.wait()
-        await stderr_task
-        return result
-
-    try:
-        code = await asyncio.wait_for(
-            consume(), timeout if timeout is not None else max(60, 4 * duration)
-        )
-    except TimeoutError as exc:
-        proc.kill()
-        await proc.wait()
-        raise MediaError("render timed out") from exc
-    if code:
-        tail = b"".join(stderr_tail).decode(errors="replace")[-2000:]
-        raise MediaError(tail or "ffmpeg render failed")
+        progress_task = asyncio.create_task(read_progress())
+        try:
+            try:
+                await asyncio.wait_for(proc.wait(), remaining())
+            except TimeoutError as exc:
+                raise MediaError("render timed out") from exc
+            await progress_task
+            await stderr_task
+            if proc.returncode:
+                tail = bytes(stderr_tail).decode(errors="replace")[-2000:]
+                raise MediaError(tail or "ffmpeg render failed")
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+            for task in (progress_task, stderr_task):
+                if not task.done():
+                    task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+    except BaseException:
+        dst.unlink(missing_ok=True)
+        raise
