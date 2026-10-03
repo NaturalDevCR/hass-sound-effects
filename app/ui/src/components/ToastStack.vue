@@ -1,0 +1,40 @@
+<script setup lang="ts">
+import { mdiAlertCircleOutline, mdiCheckCircleOutline, mdiClose, mdiInformationOutline } from "@mdi/js";
+import Icon from "@/components/Icon.vue";
+import { useToast, type ToastKind } from "@/composables/useToast";
+import { useI18n } from "@/i18n";
+
+const { t } = useI18n();
+const { toasts, dismiss } = useToast();
+
+const look: Record<ToastKind, { icon: string; tone: string }> = {
+  info: { icon: mdiInformationOutline, tone: "text-violet-200" },
+  success: { icon: mdiCheckCircleOutline, tone: "text-ok" },
+  error: { icon: mdiAlertCircleOutline, tone: "text-danger" },
+};
+</script>
+
+<template>
+  <!-- Teleported above the Sheet layer and outside #app, so toasts stay readable and
+       dismissible while a modal marks the rest of the page inert. -->
+  <Teleport to="body">
+    <div
+      class="pointer-events-none fixed inset-x-0 bottom-[calc(var(--tabbar-h)+0.75rem)] z-[70] flex flex-col items-center gap-2 px-4 md:inset-x-auto md:right-4 md:bottom-4 md:items-end"
+    >
+      <TransitionGroup name="toast">
+        <div
+          v-for="toast in toasts"
+          :key="toast.id"
+          :role="toast.kind === 'error' ? 'alert' : 'status'"
+          class="pointer-events-auto flex w-full max-w-md items-center gap-2 rounded-panel border border-line bg-raised py-1 pr-1 pl-3 shadow-xl"
+        >
+          <Icon :path="look[toast.kind].icon" :class="look[toast.kind].tone" />
+          <p class="min-w-0 flex-1 py-2 text-sm break-words">{{ toast.message }}</p>
+          <button type="button" class="btn-ghost size-11 shrink-0 p-0!" :aria-label="t('toast.dismiss')" @click="dismiss(toast.id)">
+            <Icon :path="mdiClose" />
+          </button>
+        </div>
+      </TransitionGroup>
+    </div>
+  </Teleport>
+</template>
