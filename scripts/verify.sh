@@ -21,7 +21,7 @@ else
     echo "Skipped UI tests/build (no npm or no UI yet)." >&2
 fi
 
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+if [ -f app/Dockerfile ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     docker build --build-arg BUILD_ARCH=amd64 --file app/Dockerfile --tag sound-effects-studio:verify app
 else
     echo "Skipped Docker build (daemon unavailable); CI builds the image." >&2

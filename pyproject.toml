@@ -31,6 +31,7 @@ studio = ["fastapi>=0.115", "uvicorn[standard]>=0.32", "httpx>=0.28"]
 testpaths = ["tests"]
 pythonpath = [".", "app/src"]
 asyncio_mode = "auto"
+addopts = "--import-mode=importlib"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
   "studio: tests for the Sound Effects Studio app",
