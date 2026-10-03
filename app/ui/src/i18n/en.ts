@@ -45,6 +45,8 @@ export const en = {
   "toast.dismiss": "Dismiss notification",
   "toast.job.import": "Imported “{title}”",
   "toast.job.publish": "Published “{title}”",
+  "toast.jobs.summary": "{n} jobs finished",
+  "toast.jobs.summaryFailed": "{n} jobs finished, {failed} failed",
   "toast.job.importFailed": "Couldn't import “{title}”: {reason}",
   "toast.job.publishFailed": "Couldn't publish “{title}”: {reason}",
   "toast.job.previewFailed": "Couldn't render a preview of “{title}”: {reason}",
@@ -54,6 +56,7 @@ export const en = {
   "error.network": "Can't reach Sound Effects Studio. Check your connection and try again.",
   "error.http": "Sound Effects Studio returned an error ({status}).",
   "error.unknown": "Unknown error",
+  "error.invalidResponse": "Invalid server response",
   "player.error": "This sound couldn't be played.",
 
   // --- background jobs -----------------------------------------------------

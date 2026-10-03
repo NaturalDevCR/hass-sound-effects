@@ -49,6 +49,38 @@ beforeEach(() => {
 });
 
 describe("useStudio", () => {
+  it("starts out loading and not loaded so views can skip their empty state", async () => {
+    const { useStudio } = await load();
+    const studio = useStudio();
+    expect(studio.loading.value).toBe(true);
+    expect(studio.loaded.value).toBe(false);
+    await studio.refresh();
+    expect(studio.loading.value).toBe(false);
+    expect(studio.loaded.value).toBe(true);
+  });
+
+  it("settles loading but stays not loaded when the first refresh fails; later success loads", async () => {
+    const { useStudio } = await load();
+    mocks.ui.state.mockRejectedValueOnce(new Error("offline"));
+    const studio = useStudio();
+    await studio.refresh();
+    expect(studio.loading.value).toBe(false);
+    expect(studio.loaded.value).toBe(false);
+    await studio.refresh();
+    expect(studio.loaded.value).toBe(true);
+  });
+
+  it("keeps loaded true (and the old data) when a later refresh fails", async () => {
+    const { useStudio } = await load();
+    const studio = useStudio();
+    await studio.refresh();
+    mocks.ui.sounds.list.mockRejectedValueOnce(new Error("blip"));
+    await studio.refresh();
+    expect(studio.loaded.value).toBe(true);
+    expect(studio.sounds.value).toEqual([sound]);
+    expect(studio.error.value).toBe("blip");
+  });
+
   it("loads everything in parallel", async () => {
     const { useStudio } = await load();
     const gates = Object.fromEntries(
@@ -120,6 +152,32 @@ describe("useStudio", () => {
     expect(studio.sounds.value).toHaveLength(2);
     expect(mocks.ui.state).not.toHaveBeenCalled();
     expect(mocks.ui.categories.list).not.toHaveBeenCalled();
+  });
+
+  it("clears a previous error when refreshSounds succeeds", async () => {
+    const { useStudio } = await load();
+    const studio = useStudio();
+    mocks.ui.sounds.list.mockRejectedValueOnce(new Error("offline"));
+    await studio.refreshSounds();
+    expect(studio.error.value).toBe("offline");
+    await studio.refreshSounds();
+    expect(studio.error.value).toBeNull();
+  });
+
+  it("shares one in-flight refreshSounds request and fetches again afterwards", async () => {
+    const { useStudio } = await load();
+    const studio = useStudio();
+    const gate = deferred<Sound[]>();
+    mocks.ui.sounds.list.mockReturnValueOnce(gate.promise);
+    const first = studio.refreshSounds();
+    const second = studio.refreshSounds();
+    expect(mocks.ui.sounds.list).toHaveBeenCalledTimes(1);
+    gate.resolve([sound]);
+    await Promise.all([first, second]);
+    expect(studio.sounds.value).toEqual([sound]);
+
+    await studio.refreshSounds();
+    expect(mocks.ui.sounds.list).toHaveBeenCalledTimes(2);
   });
 
   it("reports refreshSounds failures through error", async () => {

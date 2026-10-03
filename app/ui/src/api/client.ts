@@ -42,7 +42,21 @@ export class ApiError extends Error {
 
 type ApiInit = RequestInit & { json?: unknown };
 
-/** FastAPI sends `{detail: "text"}` or, for 422s, `{detail: [{msg, loc, ...}]}`. */
+/** Location prefixes FastAPI adds that say nothing about which field is wrong. */
+const LOC_ROOTS = new Set(["body", "query", "path", "header", "cookie"]);
+
+/** `{loc: ["body", "title"], msg: "Field required"}` -> "title: Field required". */
+function describeIssue(item: unknown): string | null {
+  if (typeof item === "string") return item || null;
+  const { loc, msg } = (item ?? {}) as { loc?: unknown; msg?: unknown };
+  if (typeof msg !== "string" || msg === "") return null;
+  const field = Array.isArray(loc)
+    ? [...loc].reverse().find((part) => typeof part === "string" && !LOC_ROOTS.has(part))
+    : undefined;
+  return field ? `${field}: ${msg}` : msg;
+}
+
+/** FastAPI sends `{detail: "text"}` or, for 422s, `{detail: [{loc, msg, ...}]}`. */
 async function readDetail(response: Response): Promise<string> {
   const fallback = response.statusText || translate("error.http", { status: response.status });
   try {
@@ -50,9 +64,7 @@ async function readDetail(response: Response): Promise<string> {
     const detail = (body as { detail?: unknown } | null)?.detail;
     if (typeof detail === "string" && detail) return detail;
     if (Array.isArray(detail)) {
-      const messages = detail
-        .map((item) => (typeof item === "string" ? item : (item as { msg?: unknown })?.msg))
-        .filter((msg): msg is string => typeof msg === "string" && msg !== "");
+      const messages = detail.map(describeIssue).filter((msg): msg is string => msg !== null);
       if (messages.length) return messages.join("; ");
     }
   } catch {
@@ -87,7 +99,13 @@ export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
   if (!response.ok) throw new ApiError(response.status, await readDetail(response));
   if (response.status === 204) return undefined as T;
   const text = await response.text();
-  return (text ? JSON.parse(text) : undefined) as T;
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // 2xx but not JSON: usually a proxy or Ingress page standing in for the API
+    throw new ApiError(response.status, translate("error.invalidResponse"));
+  }
 }
 
 const seg = encodeURIComponent;

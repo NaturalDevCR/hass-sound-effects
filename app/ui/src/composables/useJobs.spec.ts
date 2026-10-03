@@ -145,6 +145,46 @@ describe("useJobs polling", () => {
     jobs.stop();
   });
 
+  it("collapses more than three finished jobs into one summary toast", async () => {
+    const many = (status: "done" | "failed", n: number, from = 0) =>
+      Array.from({ length: n }, (_, i) => job({ id: `j${from + i}`, status, error: status === "failed" ? "x" : null }));
+    mocks.ui.jobs
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([...many("done", 4)])
+      .mockResolvedValue([...many("done", 4), ...many("done", 3, 10), ...many("failed", 2, 20)]);
+    const { jobs, toast } = await load();
+    jobs.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(toast.toasts.value).toHaveLength(1);
+    expect(toast.toasts.value[0]).toMatchObject({ kind: "success", message: "4 jobs finished" });
+    expect(mocks.refreshSounds).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    // 5 more finished at once, 2 of them failed: still one toast (the earlier one timed out), now an error
+    expect(toast.toasts.value).toHaveLength(1);
+    expect(toast.toasts.value[0]).toMatchObject({ kind: "error", message: "5 jobs finished, 2 failed" });
+    expect(mocks.refreshSounds).toHaveBeenCalledTimes(2);
+    jobs.stop();
+  });
+
+  it("still toasts individually up to three finished jobs", async () => {
+    mocks.ui.jobs
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        job({ id: "a", sound_title: "A" }),
+        job({ id: "b", sound_title: "B" }),
+        job({ id: "c", sound_title: "C" }),
+      ]);
+    const { jobs, toast } = await load();
+    jobs.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(toast.toasts.value.map((t) => t.message)).toEqual(["Published “A”", "Published “B”", "Published “C”"]);
+    jobs.stop();
+  });
+
   it("start() is idempotent and stop() halts polling", async () => {
     mocks.ui.jobs.mockResolvedValue([]);
     const { jobs } = await load();
@@ -155,6 +195,27 @@ describe("useJobs polling", () => {
     jobs.stop();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(mocks.ui.jobs).toHaveBeenCalledTimes(1);
+  });
+
+  it("refresh() waits for a stale in-flight poll and then makes a fresh request", async () => {
+    let release!: (list: Job[]) => void;
+    mocks.ui.jobs
+      .mockImplementationOnce(() => new Promise<Job[]>((resolve) => (release = resolve)))
+      .mockResolvedValue([job({ id: "queued-after", status: "queued", progress: 0 })]);
+    const { jobs } = await load();
+    jobs.start(); // poll #1 is now in flight, sent before the caller queues anything
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.ui.jobs).toHaveBeenCalledTimes(1);
+
+    const refreshed = jobs.refresh(); // caller queued work, wants to see it
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.ui.jobs).toHaveBeenCalledTimes(1); // not reused, not duplicated yet
+
+    release([]);
+    await refreshed;
+    expect(mocks.ui.jobs).toHaveBeenCalledTimes(2);
+    expect(jobs.active.value.map((j) => j.id)).toEqual(["queued-after"]);
+    jobs.stop();
   });
 
   it("refresh() polls right away so callers need not wait for the timer", async () => {

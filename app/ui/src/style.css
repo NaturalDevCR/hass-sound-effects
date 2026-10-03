@@ -54,9 +54,13 @@
   }
 }
 
-/* Controls: 44 px touch targets on phones, slightly denser with a mouse. */
+/* Controls: 44 px touch targets everywhere (phones, tablets, hybrid laptops). Only a
+   fine pointer (mouse) on a wide screen gets the denser desktop sizes. */
 @utility btn {
-  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-line bg-raised px-4 py-2 text-sm font-medium text-ink transition-colors select-none enabled:hover:bg-hover enabled:active:brightness-110 disabled:cursor-not-allowed disabled:opacity-45 md:min-h-10;
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-line bg-raised px-4 py-2 text-sm font-medium text-ink transition-colors select-none enabled:hover:bg-hover enabled:active:brightness-110 disabled:cursor-not-allowed disabled:opacity-45;
+  @media (pointer: fine) and (min-width: 48rem) {
+    min-height: 2.5rem;
+  }
 }
 
 @utility btn-primary {
@@ -95,8 +99,13 @@
 }
 
 @utility field {
-  /* 16 px on phones: anything smaller makes iOS zoom the page on focus. */
-  @apply block min-h-11 w-full rounded-lg border border-line bg-ground px-3 py-2 text-base text-ink placeholder:text-muted focus:border-accent md:min-h-10 md:text-sm;
+  /* 16 px unless a mouse is the pointer: anything smaller makes iOS/iPadOS zoom on focus. */
+  @apply block min-h-11 w-full rounded-lg border border-line bg-ground px-3 py-2 text-base text-ink placeholder:text-muted focus:border-accent;
+  @media (pointer: fine) and (min-width: 48rem) {
+    min-height: 2.5rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
 }
 
 @utility panel {
@@ -104,7 +113,10 @@
 }
 
 @utility chip {
-  @apply inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-line bg-raised px-4 text-sm font-medium whitespace-nowrap text-muted transition-colors select-none hover:bg-hover hover:text-ink md:min-h-9;
+  @apply inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-line bg-raised px-4 text-sm font-medium whitespace-nowrap text-muted transition-colors select-none hover:bg-hover hover:text-ink;
+  @media (pointer: fine) and (min-width: 48rem) {
+    min-height: 2.25rem;
+  }
 }
 
 @utility chip-active {

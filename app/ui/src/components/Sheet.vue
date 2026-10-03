@@ -20,7 +20,7 @@ useModal(toRef(props, "open"), panel, { onEscape: () => emit("close") });
 
 <template>
   <Teleport to="body">
-    <Transition name="sheet">
+    <Transition name="sheet" appear>
       <div v-if="open" class="sheet-root fixed inset-0 z-50">
         <div data-test="backdrop" class="absolute inset-0 bg-black/60" aria-hidden="true" @click="emit('close')" />
         <div

@@ -9,7 +9,11 @@ const categories = ref<Category[]>([]);
 const seasons = ref<Season[]>([]);
 const profiles = ref<Profile[]>([]);
 const sounds = ref<Sound[]>([]);
-const loading = ref(false);
+// `loading` starts true: until the first refresh settles the lists are empty only because
+// nothing has arrived yet, and views must not flash their empty state. `loaded` flips once,
+// after the first successful refresh, and stays true (later refreshes keep the old data).
+const loading = ref(true);
+const loaded = ref(false);
 const error = ref<string | null>(null);
 
 const categoryIndex = computed(() => new Map(categories.value.map((c) => [c.id, c])));
@@ -37,6 +41,7 @@ async function load(): Promise<void> {
     seasons.value = nextSeasons;
     profiles.value = nextProfiles;
     sounds.value = nextSounds;
+    loaded.value = true;
   } catch (cause) {
     error.value = messageOf(cause);
   }
@@ -55,13 +60,26 @@ function refresh(): Promise<void> {
   return run;
 }
 
-/** Lightweight reload used after jobs finish and after edits. */
-async function refreshSounds(): Promise<void> {
-  try {
-    sounds.value = await ui.sounds.list();
-  } catch (cause) {
-    error.value = messageOf(cause);
-  }
+let inflightSounds: Promise<void> | null = null;
+
+/**
+ * Lightweight reload used after jobs finish and after edits. Concurrent calls share one
+ * request; a call made after it settled fetches again. A success clears `error`.
+ */
+function refreshSounds(): Promise<void> {
+  if (inflightSounds) return inflightSounds;
+  const run = (async () => {
+    try {
+      sounds.value = await ui.sounds.list();
+      error.value = null;
+    } catch (cause) {
+      error.value = messageOf(cause);
+    }
+  })().finally(() => {
+    inflightSounds = null;
+  });
+  inflightSounds = run;
+  return run;
 }
 
 type Id = string | null | undefined;
@@ -74,6 +92,7 @@ export function useStudio() {
     profiles,
     sounds,
     loading,
+    loaded,
     error,
     refresh,
     refreshSounds,

@@ -8,6 +8,9 @@ declare module "vue-router" {
   }
 }
 
+const prefersReducedMotion = () =>
+  typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 const isEditor = (route: RouteLocationNormalized) => route.name === "sound";
 
 /**
@@ -55,7 +58,7 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
     ],
     scrollBehavior(to, from, saved) {
       if (saved) return saved;
-      if (to.hash) return { el: to.hash, behavior: "smooth" };
+      if (to.hash) return { el: to.hash, behavior: prefersReducedMotion() ? "auto" : "smooth" };
       // Opening or closing the editor sheet, or changing filters in the query, must not
       // throw the Library scroll position away.
       if (to.path === from.path) return false;

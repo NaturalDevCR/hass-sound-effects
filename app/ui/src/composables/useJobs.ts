@@ -7,6 +7,8 @@ import { useToast } from "./useToast";
 
 const ACTIVE_POLL_MS = 1500;
 const IDLE_POLL_MS = 10_000;
+/** More jobs than this finishing in one poll collapse into a single summary toast. */
+const MAX_INDIVIDUAL_TOASTS = 3;
 
 const jobs = ref<Job[]>([]);
 const active = computed(() => jobs.value.filter((j) => j.status === "queued" || j.status === "running"));
@@ -33,6 +35,14 @@ function describeFailure(job: Job): string {
 
 function announceFinished(finished: Job[]): void {
   const { push } = useToast();
+  if (finished.length > MAX_INDIVIDUAL_TOASTS) {
+    const failed = finished.filter((j) => j.status === "failed").length;
+    push(
+      translate(failed ? "toast.jobs.summaryFailed" : "toast.jobs.summary", { n: finished.length, failed }),
+      failed ? "error" : "success",
+    );
+    return;
+  }
   for (const job of finished) {
     if (job.status === "failed") {
       push(describeFailure(job), "error");
@@ -87,8 +97,13 @@ function schedule(): void {
   }, active.value.length ? ACTIVE_POLL_MS : IDLE_POLL_MS);
 }
 
-/** Polls right away (e.g. after queueing a render) and re-arms the timer. */
+/**
+ * Polls right away (e.g. after queueing a render) and re-arms the timer. A request that was
+ * already in flight may have been sent before the caller queued its work, so it is allowed to
+ * settle and a fresh one is made after it.
+ */
 async function refresh(): Promise<void> {
+  if (inflight) await inflight;
   await poll();
   schedule();
 }

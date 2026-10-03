@@ -46,6 +46,8 @@ export const es: Record<keyof typeof en, string> = {
   "toast.dismiss": "Cerrar notificación",
   "toast.job.import": "Se importó «{title}»",
   "toast.job.publish": "Se publicó «{title}»",
+  "toast.jobs.summary": "Terminaron {n} tareas",
+  "toast.jobs.summaryFailed": "Terminaron {n} tareas, {failed} fallaron",
   "toast.job.importFailed": "No se pudo importar «{title}»: {reason}",
   "toast.job.publishFailed": "No se pudo publicar «{title}»: {reason}",
   "toast.job.previewFailed": "No se pudo generar la vista previa de «{title}»: {reason}",
@@ -55,6 +57,7 @@ export const es: Record<keyof typeof en, string> = {
   "error.network": "No se pudo conectar con Sound Effects Studio. Revisa tu conexión e inténtalo de nuevo.",
   "error.http": "Sound Effects Studio respondió con un error ({status}).",
   "error.unknown": "Error desconocido",
+  "error.invalidResponse": "Respuesta no válida del servidor",
   "player.error": "No se pudo reproducir este sonido.",
 
   // --- background jobs -----------------------------------------------------

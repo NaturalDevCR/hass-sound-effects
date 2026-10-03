@@ -14,6 +14,8 @@ import {
   mdiBullhorn,
   mdiCakeVariant,
   mdiCalendar,
+  mdiCalendarBlank,
+  mdiCalendarStar,
   mdiCampfire,
   mdiCandycane,
   mdiCar,
@@ -37,6 +39,7 @@ import {
   mdiGarage,
   mdiGhost,
   mdiGift,
+  mdiHalloween,
   mdiGuitarElectric,
   mdiHeadphones,
   mdiHeart,
@@ -91,7 +94,9 @@ import {
 // (`"mdi:door-open"`) map to SVG paths bundled with the app. Anything outside
 // this set renders as a generic music note, so a typo or a custom Home
 // Assistant icon never leaves a hole in the UI. The Organize IconPicker offers
-// exactly these names.
+// exactly these names. Every icon the backend seeds or defaults to must be listed
+// here (see the "backend defaults" spec): calendar-blank (built-in regular season),
+// calendar-star (new-season default) and music-note (seeded general category).
 const ICONS: Record<string, string> = {
   "music-note": mdiMusicNote,
   "music": mdiMusic,
@@ -136,6 +141,7 @@ const ICONS: Record<string, string> = {
   "cake-variant": mdiCakeVariant,
   "balloon": mdiBalloon,
   "gift": mdiGift,
+  "halloween": mdiHalloween,
   "pine-tree": mdiPineTree,
   "snowflake": mdiSnowflake,
   "ghost": mdiGhost,
@@ -150,6 +156,8 @@ const ICONS: Record<string, string> = {
   "egg-easter": mdiEggEaster,
   "star": mdiStar,
   "calendar": mdiCalendar,
+  "calendar-blank": mdiCalendarBlank,
+  "calendar-star": mdiCalendarStar,
   "bat": mdiBat,
   "spider": mdiSpider,
   "campfire": mdiCampfire,

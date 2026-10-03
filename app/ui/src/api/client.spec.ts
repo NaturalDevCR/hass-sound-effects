@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, api, audioUrl, ui } from "@/api/client";
+import { useI18n } from "@/i18n";
 
 const fetchMock = vi.fn();
 
@@ -13,6 +14,7 @@ function lastCall() {
 }
 
 beforeEach(() => {
+  useI18n().setLocale("en");
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -65,7 +67,38 @@ describe("api()", () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ detail: [{ loc: ["body", "name"], msg: "Field required", type: "missing" }] }, 422),
     );
-    await expect(api("api/ui/categories")).rejects.toMatchObject({ status: 422, detail: "Field required" });
+    await expect(api("api/ui/categories")).rejects.toMatchObject({ status: 422, detail: "name: Field required" });
+  });
+
+  it("names the offending field using the last loc element", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        {
+          detail: [
+            { loc: ["body", "title"], msg: "Field required", type: "missing" },
+            { loc: ["body", "tags", 0], msg: "Input should be a valid string", type: "string_type" },
+            { loc: ["body"], msg: "Bad body", type: "x" },
+          ],
+        },
+        422,
+      ),
+    );
+    await expect(api("api/ui/sounds/s1", { method: "PATCH", json: {} })).rejects.toMatchObject({
+      status: 422,
+      detail: "title: Field required; tags: Input should be a valid string; Bad body",
+    });
+  });
+
+  it("turns a 2xx response that is not JSON into an ApiError, not a SyntaxError", async () => {
+    fetchMock.mockResolvedValue(new Response("<html>Ingress login</html>", { status: 200 }));
+    const error = await api("api/ui/state").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 200, detail: "Invalid server response" });
+  });
+
+  it("treats an empty 2xx body as undefined", async () => {
+    fetchMock.mockResolvedValue(new Response("", { status: 200 }));
+    await expect(api("api/ui/token/rotate", { method: "POST" })).resolves.toBeUndefined();
   });
 
   it("falls back to a readable message for non-JSON failures", async () => {
