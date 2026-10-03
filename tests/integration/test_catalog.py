@@ -105,6 +105,34 @@ def test_invalid_season_dates(catalog_payload: dict[str, Any], invalid: str) -> 
         parse_catalog(payload)
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"start": None},
+        {"end": None},
+        {"drop": "start"},
+        {"drop": "end"},
+    ],
+)
+def test_non_regular_season_requires_bounds(
+    catalog_payload: dict[str, Any], mutation: dict[str, Any]
+) -> None:
+    payload = deepcopy(catalog_payload)
+    season = payload["seasons"][1]
+    if "drop" in mutation:
+        del season[mutation["drop"]]
+    else:
+        season.update(mutation)
+    with pytest.raises(ValueError):
+        parse_catalog(payload)
+
+
+def test_leap_day_bound_is_accepted(catalog_payload: dict[str, Any]) -> None:
+    payload = deepcopy(catalog_payload)
+    payload["seasons"][1]["end"] = "02-29"
+    assert parse_catalog(payload).seasons[1].end == "02-29"
+
+
 @pytest.mark.parametrize("duration", [float("nan"), float("inf"), True, 10**400])
 def test_invalid_durations(catalog_payload: dict[str, Any], duration: int | float) -> None:
     payload = deepcopy(catalog_payload)

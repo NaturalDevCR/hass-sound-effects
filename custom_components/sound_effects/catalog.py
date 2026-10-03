@@ -120,7 +120,7 @@ def _parse_season(data: Mapping[str, Any]) -> SeasonDef:
     season_id = _field(data, "id", str, "season")
     start = data.get("start")
     end = data.get("end")
-    if season_id != REGULAR and ("start" not in data or "end" not in data):
+    if season_id != REGULAR and (start is None or end is None):
         raise ValueError("non-regular season requires start and end")
     if (start is not None and not isinstance(start, str)) or (
         end is not None and not isinstance(end, str)
