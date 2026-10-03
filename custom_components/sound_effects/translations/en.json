@@ -1,0 +1,49 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Sound Effects Studio",
+        "description": "Enter the Studio host, port, and API token. To reconnect after a token change, enter the new token.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "token": "API token"
+        }
+      },
+      "hassio_confirm": {
+        "title": "Sound Effects Studio discovered",
+        "description": "Connect to the {addon} app?"
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to Sound Effects Studio.",
+      "invalid_auth": "The API token was rejected."
+    },
+    "abort": {
+      "already_configured": "This Studio instance is already configured.",
+      "already_in_progress": "Configuration for this Studio instance is already in progress.",
+      "cannot_connect": "Unable to verify the discovered Studio instance.",
+      "single_instance_allowed": "Only one Studio instance can be configured.",
+      "reauth_successful": "The API token was updated.",
+      "unique_id_mismatch": "This address belongs to a different Studio instance."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Sound Effects options",
+        "description": "Set the media URL, optional season entity, and catalog polling interval.",
+        "data": {
+          "public_base_url": "Public Home Assistant base URL",
+          "season_entity": "Season entity",
+          "scan_interval": "Scan interval (seconds)"
+        },
+        "data_description": {
+          "public_base_url": "Leave empty to use Home Assistant's configured URL.",
+          "season_entity": "Optional entity whose state matches a season ID or name.",
+          "scan_interval": "Time between Studio updates, from 10 to 3600 seconds."
+        }
+      }
+    }
+  }
+}

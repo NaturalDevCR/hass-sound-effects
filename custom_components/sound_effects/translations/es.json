@@ -1,0 +1,49 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Conectar con Sound Effects Studio",
+        "description": "Introduce el host, el puerto y el token de API de Studio. Para reconectar después de cambiar el token, introduce el token nuevo.",
+        "data": {
+          "host": "Host",
+          "port": "Puerto",
+          "token": "Token de API"
+        }
+      },
+      "hassio_confirm": {
+        "title": "Sound Effects Studio detectado",
+        "description": "¿Conectar con la aplicación {addon}?"
+      }
+    },
+    "error": {
+      "cannot_connect": "No se pudo conectar con Sound Effects Studio.",
+      "invalid_auth": "El token de API fue rechazado."
+    },
+    "abort": {
+      "already_configured": "Esta instancia de Studio ya está configurada.",
+      "already_in_progress": "La configuración de esta instancia de Studio ya está en curso.",
+      "cannot_connect": "No se pudo verificar la instancia de Studio detectada.",
+      "single_instance_allowed": "Solo se puede configurar una instancia de Studio.",
+      "reauth_successful": "El token de API se actualizó.",
+      "unique_id_mismatch": "Esta dirección pertenece a otra instancia de Studio."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opciones de Sound Effects",
+        "description": "Configura la URL de audio, la entidad de temporada opcional y el intervalo de actualización del catálogo.",
+        "data": {
+          "public_base_url": "URL pública base de Home Assistant",
+          "season_entity": "Entidad de temporada",
+          "scan_interval": "Intervalo de actualización (segundos)"
+        },
+        "data_description": {
+          "public_base_url": "Deja el campo vacío para usar la URL configurada en Home Assistant.",
+          "season_entity": "Entidad opcional cuyo estado coincide con el ID o el nombre de una temporada.",
+          "scan_interval": "Tiempo entre actualizaciones de Studio, de 10 a 3600 segundos."
+        }
+      }
+    }
+  }
+}
