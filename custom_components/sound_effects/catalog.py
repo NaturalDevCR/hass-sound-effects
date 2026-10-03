@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from .const import REGULAR
 
@@ -65,7 +67,15 @@ class Catalog:
         return _find(self.seasons, ref)
 
 
-def _find(items: tuple[CategoryDef, ...] | tuple[SeasonDef, ...], ref: str) -> Any:
+class _Named(Protocol):
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def name(self) -> str: ...
+
+
+def _find[T: _Named](items: tuple[T, ...], ref: str) -> T | None:
     for item in items:
         if item.id == ref:
             return item
@@ -93,28 +103,26 @@ def _field(
 
 def parse_catalog(data: Mapping[str, Any]) -> Catalog:
     """Parse a catalog payload, rejecting missing or incorrectly typed fields."""
-    try:
-        root = _mapping(data, "catalog")
-        revision = _field(root, "revision", int, "catalog")
-        raw_seasons = _field(root, "seasons", list, "catalog")
-        raw_categories = _field(root, "categories", list, "catalog")
-        raw_sounds = _field(root, "sounds", list, "catalog")
-        seasons = tuple(_parse_season(_mapping(item, "season")) for item in raw_seasons)
-        categories = tuple(_parse_category(_mapping(item, "category")) for item in raw_categories)
-        sounds = tuple(_parse_sound(_mapping(item, "sound")) for item in raw_sounds)
-        return Catalog(revision, seasons, categories, sounds)
-    except (KeyError, TypeError, OverflowError) as err:
-        raise ValueError("invalid catalog") from err
+    root = _mapping(data, "catalog")
+    revision = _field(root, "revision", int, "catalog")
+    raw_seasons = _field(root, "seasons", list, "catalog")
+    raw_categories = _field(root, "categories", list, "catalog")
+    raw_sounds = _field(root, "sounds", list, "catalog")
+    seasons = tuple(_parse_season(_mapping(item, "season")) for item in raw_seasons)
+    categories = tuple(_parse_category(_mapping(item, "category")) for item in raw_categories)
+    sounds = tuple(_parse_sound(_mapping(item, "sound")) for item in raw_sounds)
+    return Catalog(revision, seasons, categories, sounds)
 
 
 def _parse_season(data: Mapping[str, Any]) -> SeasonDef:
     start = data.get("start")
     end = data.get("end")
-    if (
-        start is not None
-        and not isinstance(start, str)
-        or end is not None
-        and not isinstance(end, str)
+    if (start is not None and not isinstance(start, str)) or (
+        end is not None and not isinstance(end, str)
+    ):
+        raise ValueError("invalid season date")
+    if (start is not None and re.fullmatch(r"\d{2}-\d{2}", start) is None) or (
+        end is not None and re.fullmatch(r"\d{2}-\d{2}", end) is None
     ):
         raise ValueError("invalid season date")
     return SeasonDef(
@@ -147,14 +155,15 @@ def _parse_sound(data: Mapping[str, Any]) -> SoundDef:
     ):
         raise ValueError("invalid sound tags or seasons")
     published = _mapping(data.get("published"), "published")
+    duration = _field(published, "duration", (int, float), "published")
+    if isinstance(duration, bool) or not math.isfinite(duration) or duration < 0:
+        raise ValueError("invalid published duration")
     published_def = PublishedDef(
         _field(published, "revision", int, "published"),
         _field(published, "filename", str, "published"),
-        _field(published, "duration", (int, float), "published"),
+        float(duration),
         _field(published, "mime_type", str, "published"),
     )
-    if published_def.duration < 0:
-        raise ValueError("invalid published duration")
     return SoundDef(
         _field(data, "id", str, "sound"),
         _field(data, "category_id", str, "sound"),

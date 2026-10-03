@@ -1,18 +1,15 @@
-"""Season matching and effective season resolution."""
+"""Yearly season calendar shared (by copy) with the sound_effects integration."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable
 from datetime import date
 from typing import Protocol
 
-from .catalog import Catalog
-from .const import REGULAR
+REGULAR = "regular"
 
 
 class SeasonLike(Protocol):
-    """The calendar fields needed to resolve a season."""
-
     @property
     def id(self) -> str: ...
 
@@ -26,45 +23,34 @@ class SeasonLike(Protocol):
     def priority(self) -> int: ...
 
 
-class UnknownSeasonError(ValueError):
-    """Raised when an action explicitly requests an unknown season."""
-
-
-def _value(season: SeasonLike | Mapping[str, object], field: str) -> object:
-    return season[field] if isinstance(season, Mapping) else getattr(season, field)
-
-
-def season_matches(season: SeasonLike | Mapping[str, object], day: date) -> bool:
-    """Return whether day is in the inclusive MM-DD range, including year wrapping."""
-    season_id = _value(season, "id")
-    start = _value(season, "start")
-    end = _value(season, "end")
-    if season_id == REGULAR or start is None or end is None:
+def season_matches(start: str | None, end: str | None, mmdd: str) -> bool:
+    """Return True when MM-DD falls inside an inclusive, possibly year-wrapping range."""
+    if not start or not end:
         return False
-    if not isinstance(start, str) or not isinstance(end, str):
-        return False
-    current = day.strftime("%m-%d")
     if start <= end:
-        return start <= current <= end
-    return current >= start or current <= end
+        return start <= mmdd <= end
+    return mmdd >= start or mmdd <= end
 
 
-def resolve_calendar_season(
-    seasons: list[SeasonLike | Mapping[str, object]]
-    | tuple[SeasonLike | Mapping[str, object], ...],
-    day: date,
-) -> str:
-    """Resolve matching special seasons by priority, then lexicographic id."""
-    matches = [season for season in seasons if season_matches(season, day)]
+def resolve_calendar_season(seasons: Iterable[SeasonLike], day: date) -> str:
+    """Pick the highest-priority season whose range contains the day, else regular."""
+    mmdd = day.strftime("%m-%d")
+    matches = [
+        season
+        for season in seasons
+        if season.id != REGULAR and season_matches(season.start, season.end, mmdd)
+    ]
     if not matches:
         return REGULAR
+    matches.sort(key=lambda season: (-season.priority, season.id))
+    return matches[0].id
 
-    def sort_key(season: SeasonLike | Mapping[str, object]) -> tuple[int, str]:
-        priority = _value(season, "priority")
-        return (-priority if isinstance(priority, int) else 0, str(_value(season, "id")))
 
-    winner = min(matches, key=sort_key)
-    return str(_value(winner, "id"))
+from .catalog import Catalog  # noqa: E402
+
+
+class UnknownSeasonError(ValueError):
+    """Raised when an action explicitly requests an unknown season."""
 
 
 def resolve_effective_season(

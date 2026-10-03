@@ -10,33 +10,48 @@ from custom_components.sound_effects.seasons import UnknownSeasonError, resolve_
 pytestmark = pytest.mark.integration
 
 
-def test_precedence(catalog_payload: dict[str, object]) -> None:
+def test_source_precedence(catalog_payload: dict[str, object]) -> None:
     catalog = parse_catalog(catalog_payload)
-    args = {
+    day = date(2026, 10, 15)
+    base = {
         "catalog": catalog,
-        "day": date(2026, 7, 1),
+        "day": day,
         "action_season": None,
         "override": None,
         "entity_state": None,
     }
-    assert resolve_effective_season(**(args | {"action_season": "halloween"})) == (
-        "halloween",
-        "action",
+    assert resolve_effective_season(
+        **(base | {"action_season": "regular", "override": "halloween"})
+    ) == ("regular", "action")
+    assert resolve_effective_season(
+        **(base | {"override": "halloween", "entity_state": "Regular"})
+    ) == ("halloween", "override")
+    assert resolve_effective_season(**(base | {"entity_state": "Regular"})) == ("regular", "entity")
+    assert resolve_effective_season(**(base | {"override": "regular"})) == ("regular", "override")
+
+
+@pytest.mark.parametrize("state", ["unknown", "unavailable", "", "Christmas"])
+def test_ignored_entity_states_fall_through_to_calendar(
+    catalog_payload: dict[str, object], state: str
+) -> None:
+    result = resolve_effective_season(
+        parse_catalog(catalog_payload),
+        date(2026, 10, 15),
+        action_season=None,
+        override=None,
+        entity_state=state,
     )
-    assert resolve_effective_season(**(args | {"override": "halloween"})) == (
-        "halloween",
-        "override",
-    )
-    assert resolve_effective_season(**(args | {"entity_state": "Halloween"})) == (
-        "halloween",
-        "entity",
-    )
-    assert resolve_effective_season(**(args | {"day": date(2026, 10, 15)})) == (
-        "halloween",
-        "calendar",
-    )
-    assert resolve_effective_season(**args) == ("regular", "default")
-    assert resolve_effective_season(**(args | {"override": "nope"})) == ("regular", "default")
+    assert result == ("halloween", "calendar")
+
+
+def test_no_calendar_match_uses_default(catalog_payload: dict[str, object]) -> None:
+    assert resolve_effective_season(
+        parse_catalog(catalog_payload),
+        date(2026, 7, 1),
+        action_season=None,
+        override=None,
+        entity_state=None,
+    ) == ("regular", "default")
 
 
 def test_unknown_action_is_error(catalog_payload: dict[str, object]) -> None:

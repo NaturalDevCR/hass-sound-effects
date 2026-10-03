@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -14,9 +15,15 @@ CASES: list[dict[str, Any]] = json.loads(
 )
 
 
+@dataclass(frozen=True)
+class ContractSeason:
+    id: str
+    start: str | None
+    end: str | None
+    priority: int
+
+
 @pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
 def test_integration_calendar(case: dict[str, Any]) -> None:
-    assert (
-        resolve_calendar_season(case["seasons"], date.fromisoformat(case["date"]))
-        == case["expected"]
-    )
+    seasons = [ContractSeason(**season) for season in case["seasons"]]
+    assert resolve_calendar_season(seasons, date.fromisoformat(case["date"])) == case["expected"]

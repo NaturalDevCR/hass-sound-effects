@@ -22,8 +22,8 @@ class BagState:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> BagState:
-        raw_remaining: Any = data.get("remaining", [])
-        raw_played: Any = data.get("played", [])
+        raw_remaining = data.get("remaining", [])
+        raw_played = data.get("played", [])
         last = data.get("last")
         if not isinstance(raw_remaining, list):
             raise ValueError("invalid remaining bag ids")
@@ -37,9 +37,7 @@ class BagState:
             raise ValueError("invalid played bag ids")
         if last is not None and not isinstance(last, str):
             raise ValueError("invalid last bag id")
-        remaining = cast(list[str], raw_remaining)
-        played = cast(list[str], raw_played)
-        return cls(remaining.copy(), played.copy(), last)
+        return cls(cast(list[str], raw_remaining).copy(), cast(list[str], raw_played).copy(), last)
 
 
 class NoEligibleSoundError(Exception):
@@ -111,7 +109,10 @@ def select(
         candidates = eligible_sounds(catalog, category_id, chosen_season, normalized_tags)
         fallback = bool(candidates)
     if not candidates:
-        raise NoEligibleSoundError("no eligible sound")
+        tag_list = sorted(set(normalized_tags))
+        raise NoEligibleSoundError(
+            f"no eligible sound for category={category_id} season={season_id} tags={tag_list}"
+        )
     key = bag_key(category_id, chosen_season, normalized_tags)
     bag = bags.get(key, BagState([], [], None))
     sound_id, next_bag = draw(bag, [sound.id for sound in candidates], rng)
