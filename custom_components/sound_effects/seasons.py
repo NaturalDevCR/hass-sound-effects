@@ -6,6 +6,8 @@ from collections.abc import Iterable
 from datetime import date
 from typing import Protocol
 
+from .catalog import Catalog
+
 REGULAR = "regular"
 
 
@@ -44,9 +46,6 @@ def resolve_calendar_season(seasons: Iterable[SeasonLike], day: date) -> str:
         return REGULAR
     matches.sort(key=lambda season: (-season.priority, season.id))
     return matches[0].id
-
-
-from .catalog import Catalog  # noqa: E402
 
 
 class UnknownSeasonError(ValueError):

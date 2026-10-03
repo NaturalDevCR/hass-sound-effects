@@ -44,6 +44,28 @@ def test_ignored_entity_states_fall_through_to_calendar(
     assert result == ("halloween", "calendar")
 
 
+@pytest.mark.parametrize(
+    ("override", "entity_state", "expected"),
+    [("nope", None, ("halloween", "calendar")), ("nope", "Regular", ("regular", "entity"))],
+)
+def test_unknown_override_falls_through(
+    catalog_payload: dict[str, object],
+    override: str,
+    entity_state: str | None,
+    expected: tuple[str, str],
+) -> None:
+    assert (
+        resolve_effective_season(
+            parse_catalog(catalog_payload),
+            date(2026, 10, 15),
+            action_season=None,
+            override=override,
+            entity_state=entity_state,
+        )
+        == expected
+    )
+
+
 def test_no_calendar_match_uses_default(catalog_payload: dict[str, object]) -> None:
     assert resolve_effective_season(
         parse_catalog(catalog_payload),

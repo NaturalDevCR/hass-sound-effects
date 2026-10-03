@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import math
 import re
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from typing import Any, Protocol, cast
 
 from .const import REGULAR
@@ -115,18 +117,27 @@ def parse_catalog(data: Mapping[str, Any]) -> Catalog:
 
 
 def _parse_season(data: Mapping[str, Any]) -> SeasonDef:
+    season_id = _field(data, "id", str, "season")
     start = data.get("start")
     end = data.get("end")
+    if season_id != REGULAR and ("start" not in data or "end" not in data):
+        raise ValueError("non-regular season requires start and end")
     if (start is not None and not isinstance(start, str)) or (
         end is not None and not isinstance(end, str)
     ):
         raise ValueError("invalid season date")
-    if (start is not None and re.fullmatch(r"\d{2}-\d{2}", start) is None) or (
-        end is not None and re.fullmatch(r"\d{2}-\d{2}", end) is None
+    if (start is not None and re.fullmatch(r"[0-9]{2}-[0-9]{2}", start) is None) or (
+        end is not None and re.fullmatch(r"[0-9]{2}-[0-9]{2}", end) is None
     ):
         raise ValueError("invalid season date")
+    for value in (start, end):
+        if value is not None:
+            try:
+                date(2000, int(value[:2]), int(value[3:]))
+            except ValueError as err:
+                raise ValueError("invalid season date") from err
     return SeasonDef(
-        _field(data, "id", str, "season"),
+        season_id,
         _field(data, "name", str, "season"),
         _field(data, "color", str, "season"),
         _field(data, "icon", str, "season"),
@@ -156,7 +167,12 @@ def _parse_sound(data: Mapping[str, Any]) -> SoundDef:
         raise ValueError("invalid sound tags or seasons")
     published = _mapping(data.get("published"), "published")
     duration = _field(published, "duration", (int, float), "published")
-    if isinstance(duration, bool) or not math.isfinite(duration) or duration < 0:
+    if isinstance(duration, bool) or duration < 0:
+        raise ValueError("invalid published duration")
+    if isinstance(duration, int):
+        if duration > sys.float_info.max:
+            raise ValueError("invalid published duration")
+    elif not math.isfinite(duration):
         raise ValueError("invalid published duration")
     published_def = PublishedDef(
         _field(published, "revision", int, "published"),

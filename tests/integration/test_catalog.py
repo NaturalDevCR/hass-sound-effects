@@ -47,20 +47,20 @@ def test_exact_id_precedes_casefold_name_match() -> None:
         ],
         "categories": [
             {
-                "id": "same",
-                "name": "Other",
-                "icon": "",
-                "color": "",
-                "description": "",
-                "sort_order": 0,
-            },
-            {
                 "id": "different",
                 "name": "same",
                 "icon": "",
                 "color": "",
                 "description": "",
                 "sort_order": 1,
+            },
+            {
+                "id": "same",
+                "name": "Other",
+                "icon": "",
+                "color": "",
+                "description": "",
+                "sort_order": 0,
             },
         ],
         "sounds": [],
@@ -92,3 +92,29 @@ def test_invalid_catalog_inputs(catalog_payload: dict[str, Any], mutation: str) 
         payload["sounds"][0]["published"]["duration"] = -1
     with pytest.raises(ValueError):
         parse_catalog(payload)
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    ["99-99", "1-01", "٠١-٠١"],
+)
+def test_invalid_season_dates(catalog_payload: dict[str, Any], invalid: str) -> None:
+    payload = deepcopy(catalog_payload)
+    payload["seasons"][1]["start"] = invalid
+    with pytest.raises(ValueError):
+        parse_catalog(payload)
+
+
+@pytest.mark.parametrize("duration", [float("nan"), float("inf"), True, 10**400])
+def test_invalid_durations(catalog_payload: dict[str, Any], duration: int | float) -> None:
+    payload = deepcopy(catalog_payload)
+    payload["sounds"][0]["published"]["duration"] = duration
+    with pytest.raises(ValueError):
+        parse_catalog(payload)
+
+
+def test_integer_duration_is_coerced_to_float(catalog_payload: dict[str, Any]) -> None:
+    payload = deepcopy(catalog_payload)
+    payload["sounds"][0]["published"]["duration"] = 3
+    assert parse_catalog(payload).sounds[0].published.duration == 3.0
+    assert isinstance(parse_catalog(payload).sounds[0].published.duration, float)

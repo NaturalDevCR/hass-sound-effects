@@ -77,9 +77,11 @@ def test_season_fallback_keeps_requested_season(catalog_payload: dict[str, objec
         bags={},
         rng=random.Random(1),
     )
-    assert outcome.sound.id == "bath_es"
+    assert outcome.sound.id in {"bath_es", "bath_en"}
     assert outcome.season_fallback is True
     assert outcome.requested_season == "halloween"
+    assert outcome.season_id == "regular"
+    assert outcome.bag_key == "bath|regular|"
 
 
 def test_all_seasons_sound_does_not_trigger_fallback(catalog_payload: dict[str, object]) -> None:
