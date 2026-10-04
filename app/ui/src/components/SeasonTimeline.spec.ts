@@ -65,3 +65,25 @@ it("ignores stale date results and presents resolve errors inline", async () => 
   expect(w.text()).not.toContain("Old result");
   resolve.mockRestore();
 });
+
+it.each([
+  ["10-01", "10-31", [[274, 31]]],
+  ["12-01", "01-06", [[335, 31], [0, 6]]],
+  ["02-29", "02-29", [[59, 1]]],
+])("uses inclusive leap-year geometry for %s through %s", (start, end, geometry) => {
+  const w = mount(SeasonTimeline, { props: { seasons: [makeSeason({ id: "range", start, end })] } });
+  const segments = w.findAll('[data-season="range"]');
+  expect(segments).toHaveLength(geometry.length);
+  segments.forEach((segment, i) => {
+    const style = (segment.element as HTMLElement).style;
+    const [left, width] = geometry[i]!;
+    expect(parseFloat(style.left)).toBeCloseTo(left! / 366 * 100);
+    expect(parseFloat(style.width)).toBeCloseTo(width! / 366 * 100);
+    expect(segment.classes()).toContain("min-w-[4px]");
+    expect(segment.attributes("aria-hidden")).toBe(i > 0 ? "true" : undefined);
+  });
+});
+it("can hide the timeline legend when the organize list supplies it", () => {
+  const w = mount(SeasonTimeline, { props: { seasons: [makeSeason({ id: "one", start: "01-01", end: "01-01" })], showLegend: false } });
+  expect(w.find("ul").exists()).toBe(false);
+});

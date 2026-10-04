@@ -30,6 +30,7 @@ watch(
     draft.value = value;
     check();
   },
+  { immediate: true },
 );
 function check(): void {
   valid.value = /^#[0-9a-f]{6}$/i.test(draft.value);

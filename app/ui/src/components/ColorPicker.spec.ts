@@ -12,3 +12,8 @@ it("offers 12 swatches and only accepts six-digit hex colors", async () => {
   await w.get("input").setValue("#123456");
   expect(w.find('[role="alert"]').exists()).toBe(false);
 });
+
+it.each([["#8b5cf6", true], ["invalid", false]])("emits initial validity for %s", (modelValue, valid) => {
+  const w = mount(ColorPicker, { props: { modelValue: modelValue as string } });
+  expect(w.emitted("valid")).toEqual([[valid]]);
+});

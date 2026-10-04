@@ -215,6 +215,8 @@ export const es: Record<keyof typeof en, string> = {
   "upload.limit": "Hasta {n} MB por archivo",
   "upload.unsupported": "Este tipo de archivo no es compatible.",
   "upload.oversized": "Este archivo supera el límite de {n} MB.",
+  "upload.soundRemoved": "Se eliminó el sonido",
+  "organize.position": "{name} se movió a la posición {n} de {total}",
   "upload.emptyFile": "Este archivo está vacío.",
   "upload.invalidDefaults":
     "Elige una categoría y al menos una temporada, o todas las temporadas.",

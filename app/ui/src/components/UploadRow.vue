@@ -26,7 +26,7 @@ const { t } = useI18n();
         </p>
       </div>
       <button
-        v-if="item.status === 'error' && !item.soundId"
+        v-if="item.status === 'error' && !item.soundId && item.retryable"
         type="button"
         class="btn-ghost size-11 shrink-0 p-0!"
         :aria-label="t('upload.retry', { name: item.file.name })"
@@ -35,7 +35,7 @@ const { t } = useI18n();
         <Icon :path="mdiReload" />
       </button>
       <button
-        v-if="item.status !== 'uploading' && item.status !== 'processing'"
+        v-if="item.status !== 'uploading'"
         type="button"
         class="btn-ghost size-11 shrink-0 p-0!"
         :aria-label="t('upload.remove', { name: item.file.name })"

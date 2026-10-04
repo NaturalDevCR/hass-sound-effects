@@ -25,6 +25,8 @@ const tab = ref<Tab>("categories");
 const editor = ref<Editor | null>(null);
 const formBusy = ref(false);
 const pending = ref(false);
+const acting = ref<{ kind: Tab; id: string } | null>(null);
+const announcement = ref("");
 const error = ref<string | null>(null);
 const title = computed(() => {
   const kind = editor.value?.kind;
@@ -54,40 +56,47 @@ function tabKey(event: KeyboardEvent): void {
 }
 async function reorder(index: number, delta: number): Promise<void> {
   if (pending.value || index + delta < 0 || index + delta >= categories.value.length) return;
+  const moved = categories.value[index]!;
   const ids = categories.value.map((c) => c.id);
   [ids[index], ids[index + delta]] = [ids[index + delta]!, ids[index]!];
   pending.value = true;
+  acting.value = { kind: "categories", id: moved.id };
+  announcement.value = "";
   error.value = null;
   try {
     await ui.categories.reorder(ids);
     await refresh();
+    announcement.value = t("organize.position", { name: moved.name, n: index + delta + 1, total: ids.length });
   } catch (cause) {
     error.value = messageOf(cause);
+    useToast().push(error.value, "error");
   } finally {
     pending.value = false;
+    acting.value = null;
   }
 }
 async function remove(kind: Tab, value: Category | Season | Profile): Promise<void> {
   if (pending.value || (kind === "seasons" && value.id === "regular")) return;
+  const confirmed = await useConfirm().confirm({
+    title: t("organize.delete.title", { name: value.name }),
+    message: t(kind === "seasons" ? "organize.delete.message" : "organize.delete.simple"),
+    danger: true,
+    confirmLabel: t("common.delete"),
+  });
+  if (!confirmed || pending.value) return;
   pending.value = true;
+  acting.value = { kind, id: value.id };
   error.value = null;
   try {
-    if (
-      !(await useConfirm().confirm({
-        title: t("organize.delete.title", { name: value.name }),
-        message: t(kind === "seasons" ? "organize.delete.message" : "organize.delete.simple"),
-        danger: true,
-        confirmLabel: t("common.delete"),
-      }))
-    )
-      return;
     await ui[kind].remove(value.id);
     await refresh();
     useToast().push(t("organize.deleted"), "success");
   } catch (cause) {
     error.value = messageOf(cause);
+    useToast().push(error.value, "error");
   } finally {
     pending.value = false;
+    acting.value = null;
   }
 }
 </script>
@@ -137,9 +146,7 @@ async function remove(kind: Tab, value: Category | Season | Profile): Promise<vo
       >
         {{ error }}
       </p>
-      <p v-if="pending" role="status" class="text-sm text-muted">
-        {{ t("common.loading") }}
-      </p>
+      <p class="sr-only" aria-live="polite" aria-atomic="true">{{ announcement }}</p>
       <div class="grid min-w-0 gap-4 xl:grid-cols-3" :aria-busy="pending">
         <section
           id="organize-categories"
@@ -151,6 +158,7 @@ async function remove(kind: Tab, value: Category | Season | Profile): Promise<vo
           <OrganizeCategories
             :categories="categories"
             :pending="pending"
+            :acting-id="acting?.kind === 'categories' ? acting.id : null"
             @create="open({ kind: 'categories' })"
             @edit="open({ kind: 'categories', value: $event })"
             @remove="remove('categories', $event)"
@@ -167,6 +175,7 @@ async function remove(kind: Tab, value: Category | Season | Profile): Promise<vo
           <OrganizeSeasons
             :seasons="seasons"
             :pending="pending"
+            :acting-id="acting?.kind === 'seasons' ? acting.id : null"
             @create="open({ kind: 'seasons' })"
             @edit="open({ kind: 'seasons', value: $event })"
             @remove="remove('seasons', $event)"
@@ -182,6 +191,7 @@ async function remove(kind: Tab, value: Category | Season | Profile): Promise<vo
           <OrganizeProfiles
             :profiles="profiles"
             :pending="pending"
+            :acting-id="acting?.kind === 'profiles' ? acting.id : null"
             @create="open({ kind: 'profiles' })"
             @edit="open({ kind: 'profiles', value: $event })"
             @remove="remove('profiles', $event)"

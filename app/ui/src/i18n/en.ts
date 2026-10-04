@@ -214,6 +214,8 @@ export const en = {
   "upload.limit": "Up to {n} MB per file",
   "upload.unsupported": "This file type is not supported.",
   "upload.oversized": "This file exceeds the {n} MB limit.",
+  "upload.soundRemoved": "Sound was removed",
+  "organize.position": "{name} moved to position {n} of {total}",
   "upload.emptyFile": "This file is empty.",
   "upload.invalidDefaults":
     "Choose a category and at least one season, or all seasons.",

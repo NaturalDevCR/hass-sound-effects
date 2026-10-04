@@ -4,7 +4,7 @@ import type { Season } from "@/api/types";
 import { messageOf, ui } from "@/api/client";
 import { useI18n, type MessageKey } from "@/i18n";
 import SeasonBadge from "./SeasonBadge.vue";
-const props = defineProps<{ seasons: Season[] }>();
+const props = withDefaults(defineProps<{ seasons: Season[]; showLegend?: boolean }>(), { showLegend: true });
 const { t } = useI18n();
 const id = useId();
 const months = Array.from({ length: 12 }, (_, index) => index + 1);
@@ -67,7 +67,7 @@ const resolved = computed(() => props.seasons.find((s) => s.id === result.value)
       :aria-label="t('season.timeline')"
       class="relative rounded-lg border border-line bg-ground px-1 py-3"
     >
-      <div class="relative h-6 text-[10px] text-muted">
+      <div class="relative h-6 text-[11px] text-muted">
         <span
           v-for="month in months"
           :key="month"
@@ -86,6 +86,7 @@ const resolved = computed(() => props.seasons.find((s) => s.id === result.value)
             :key="index"
             :data-season="row.season.id"
             role="img"
+            :aria-hidden="index > 0 ? true : undefined"
             :aria-label="
               t('season.range', {
                 name: row.season.name,
@@ -93,7 +94,7 @@ const resolved = computed(() => props.seasons.find((s) => s.id === result.value)
                 end: row.season.end!,
               })
             "
-            class="absolute inset-y-1 rounded border border-white/20"
+            class="absolute inset-y-1 min-w-[4px] rounded border border-white/20"
             :style="{
               left: `${(segment.start / 366) * 100}%`,
               width: `${((segment.end - segment.start) / 366) * 100}%`,
@@ -111,7 +112,7 @@ const resolved = computed(() => props.seasons.find((s) => s.id === result.value)
         />
       </div>
     </div>
-    <ul v-if="rows.length" class="space-y-2">
+    <ul v-if="showLegend && rows.length" class="space-y-2">
       <li v-for="row in rows" :key="row.season.id" class="flex flex-wrap items-center gap-2 text-xs text-muted">
         <SeasonBadge
           class="max-w-full [&>span:last-child]:min-w-0 [&>span:last-child]:truncate"

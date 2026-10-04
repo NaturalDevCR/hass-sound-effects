@@ -15,7 +15,7 @@ import { useStudio } from "@/composables/useStudio";
 import { useI18n } from "@/i18n";
 import { addTag } from "@/lib/tags";
 const { t, tp } = useI18n();
-const { categories, sounds, loaded, loading, refresh, error } = useStudio();
+const { categories, sounds, seasons: availableSeasons, profiles, loaded, loading, refresh, error } = useStudio();
 const { items, busy, add, start, remove, clearDone, retry } = useUpload();
 const dropZone = ref<InstanceType<typeof DropZone> | null>(null);
 const category = ref("");
@@ -34,6 +34,34 @@ const tags = ref<string[]>([]);
 const draft = ref("");
 const profile = ref<string | null>(CATEGORY_DEFAULT);
 const suggestions = computed(() => [...new Set(sounds.value.flatMap((s) => s.tags))].sort());
+const defaultsSummary = computed(() => {
+  const categoryName = categories.value.find((c) => c.id === category.value)?.name
+    ?? t("library.dialog.category.placeholder");
+  const seasonNames = seasons.value.all_seasons
+    ? t("library.item.allSeasons")
+    : seasons.value.seasons.map((id) => availableSeasons.value.find((s) => s.id === id)?.name ?? id).join(", ")
+      || t("common.none");
+  const profileName = profile.value === CATEGORY_DEFAULT
+    ? t("picker.profile.categoryDefault")
+    : profile.value === null
+      ? t("picker.profile.none")
+      : profiles.value.find((p) => p.id === profile.value)?.name ?? "";
+  return [categoryName, seasonNames, profileName].join(" · ");
+});
+const bar = ref<HTMLElement | null>(null);
+const barHeight = ref(160);
+watch(
+  bar,
+  (element, _, onCleanup) => {
+    if (!element) return;
+    const measure = () => { barHeight.value = element.getBoundingClientRect().height; };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    onCleanup(() => observer.disconnect());
+  },
+  { flush: "post" },
+);
 const defaultsOpen = ref(false);
 const newCategory = ref(false);
 const categoryBusy = ref(false);
@@ -56,7 +84,11 @@ function created(value: Category): void {
 }
 </script>
 <template>
-  <section class="min-w-0 space-y-4 pb-24" aria-labelledby="upload-heading">
+  <section
+    class="min-w-0 space-y-4"
+    :style="{ paddingBottom: items.length ? `${barHeight + 24}px` : undefined }"
+    aria-labelledby="upload-heading"
+  >
     <h2 id="upload-heading" class="text-xl font-semibold">
       {{ t("upload.heading") }}
     </h2>
@@ -81,8 +113,16 @@ function created(value: Category): void {
             aria-controls="upload-defaults"
             @click="defaultsOpen = !defaultsOpen"
           >
-            <span>{{ t("upload.defaults") }}</span
-            ><span aria-hidden="true">{{ defaultsOpen ? "−" : "+" }}</span>
+            <span class="min-w-0">
+              <span class="block">{{ t("upload.defaults") }}</span>
+              <span
+                v-if="!defaultsOpen"
+                data-test="defaults-summary"
+                class="block truncate text-xs font-normal text-muted"
+                :title="defaultsSummary"
+              >{{ defaultsSummary }}</span>
+            </span>
+            <span aria-hidden="true">{{ defaultsOpen ? "−" : "+" }}</span>
           </button>
           <h3 class="mb-2 hidden font-medium lg:block">
             {{ t("upload.defaults") }}
@@ -133,8 +173,10 @@ function created(value: Category): void {
       </div>
     </div>
     <div
-      v-if="loaded"
-      class="fixed inset-x-0 bottom-[var(--tabbar-h)] z-30 border-t border-line bg-surface/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur md:left-60 md:px-6"
+      v-if="loaded && items.length"
+      ref="bar"
+      data-test="upload-bar"
+      class="fixed inset-x-0 bottom-[var(--tabbar-h)] z-30 border-t border-line bg-surface/95 px-4 pt-3 pb-3 md:pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur md:left-60 md:px-6"
     >
       <p v-if="!valid && count" role="alert" class="mx-auto mb-2 max-w-7xl text-sm text-warn">
         {{ t("upload.invalidDefaults") }}

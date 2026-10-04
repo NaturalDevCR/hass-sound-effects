@@ -1,6 +1,7 @@
 import { ref, watch, type Ref } from "vue";
 import { messageOf, ui } from "@/api/client";
 import type { UploadComplete } from "@/api/types";
+import { CATEGORY_DEFAULT } from "@/components/ProfilePicker.vue";
 import { translate } from "@/i18n";
 import { useStudio } from "./useStudio";
 import { useJobs } from "./useJobs";
@@ -12,12 +13,14 @@ export type UploadItem = {
   progress: number;
   error: string | null;
   soundId: string | null;
+  retryable: boolean;
 };
 export type UploadDefaults = Omit<UploadComplete, "title">;
 export const UPLOAD_EXTENSIONS = [".mp3", ".wav", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".webm", ".mp4", ".mov"];
 const items: Ref<UploadItem[]> = ref([]);
 const busy = ref(false);
 const studio = useStudio();
+let seq = 0;
 let run: Promise<void> | null = null;
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -43,6 +46,10 @@ watch(studio.sounds, (sounds) => {
   for (const item of items.value) {
     if (item.status !== "processing" || !item.soundId) continue;
     const sound = byId.get(item.soundId);
+    if (!sound && studio.loaded.value) {
+      item.status = "error";
+      item.error = translate("upload.soundRemoved");
+    }
     if (sound?.status === "ready") item.status = "done";
     if (sound?.status === "failed") {
       item.status = "error";
@@ -56,11 +63,12 @@ function add(files: FileList | File[]): void {
   for (const file of Array.from(files)) {
     const error = validation(file);
     items.value.push({
-      id: crypto.randomUUID(),
+      id: `upload-${++seq}-${Date.now().toString(36)}`,
       file,
       status: error ? "error" : "pending",
       progress: 0,
       error,
+      retryable: !error,
       soundId: null,
     });
   }
@@ -69,6 +77,7 @@ function add(files: FileList | File[]): void {
 async function upload(item: UploadItem, body: UploadDefaults): Promise<void> {
   if (!items.value.includes(item)) return;
   item.error = validation(item.file);
+  item.retryable = !item.error;
   if (item.error) {
     item.status = "error";
     return;
@@ -102,7 +111,7 @@ function start(defaults: UploadDefaults): Promise<void> {
     seasons: [...defaults.seasons],
     tags: [...defaults.tags],
   };
-  if (body.profile_id === "__category_default__" || body.profile_id === undefined) delete body.profile_id;
+  if (body.profile_id === CATEGORY_DEFAULT || body.profile_id === undefined) delete body.profile_id;
   const queue = items.value.filter((item) => item.status === "pending");
   busy.value = true;
   async function worker(): Promise<void> {
@@ -117,14 +126,14 @@ function start(defaults: UploadDefaults): Promise<void> {
   return run;
 }
 function remove(id: string): void {
-  items.value = items.value.filter(
-    (item) => item.id !== id || item.status === "uploading" || item.status === "processing",
-  );
+  items.value = items.value.filter((item) => item.id !== id || item.status === "uploading");
+  schedule();
 }
 function retry(id: string): void {
   const item = items.value.find((item) => item.id === id);
   if (item?.status !== "error" || item.soundId) return;
   item.error = validation(item.file);
+  item.retryable = !item.error;
   if (!item.error) {
     item.status = "pending";
     item.progress = 0;

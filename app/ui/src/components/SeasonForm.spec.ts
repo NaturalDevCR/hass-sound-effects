@@ -31,7 +31,10 @@ it("validates name and priority; month selects adapt including leap day", async 
   await w.get('[data-test="priority"]').setValue("10");
   await w.get("form").trigger("submit");
   await flushPromises();
-  expect(create).toHaveBeenCalled();
+  expect(create).toHaveBeenCalledExactlyOnceWith({
+    name: "Winter", color: "#34d399", icon: "mdi:calendar-star",
+    start: "04-29", end: "12-31", priority: 10,
+  });
   create.mockRestore();
 });
 it("only patches name, color and icon for regular", async () => {

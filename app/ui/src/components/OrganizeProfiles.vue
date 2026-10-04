@@ -5,7 +5,7 @@ import Icon from "./Icon.vue";
 import EmptyState from "./EmptyState.vue";
 import { useI18n } from "@/i18n";
 import { formatLufs, formatDb } from "@/lib/format";
-defineProps<{ profiles: Profile[]; pending: boolean }>();
+defineProps<{ profiles: Profile[]; pending: boolean; actingId?: string | null }>();
 const emit = defineEmits<{
   create: [];
   edit: [value: Profile];
@@ -47,6 +47,9 @@ const { t } = useI18n();
         </div>
       </dl>
       <div class="mt-2 flex justify-end gap-1">
+        <span class="mr-auto grid size-11 place-items-center">
+          <span v-if="actingId === profile.id" role="status" :aria-label="t('common.loading')" class="size-4 animate-spin rounded-full border-2 border-muted border-t-transparent" />
+        </span>
         <button
           type="button"
           class="btn-ghost size-11 p-0!"

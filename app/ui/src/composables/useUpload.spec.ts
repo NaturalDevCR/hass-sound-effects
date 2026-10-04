@@ -34,6 +34,7 @@ describe("useUpload", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     useUpload().items.value = [];
+    useStudio().loaded.value = false;
     useStudio().sounds.value = [];
     vi.mocked(ui.uploads.create).mockResolvedValue({
       upload_id: "u",
@@ -45,6 +46,7 @@ describe("useUpload", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
   it("sends a 9 MB file as three sequential raw chunks and completes with defaults", async () => {
     const upload = useUpload();
@@ -141,8 +143,6 @@ describe("useUpload", () => {
     await running;
     expect(ui.uploads.complete).toHaveBeenCalledWith("u", { ...defaults, tags: ["first"], seasons: ["regular"] });
     expect(upload.items.value[0]?.progress).toBe(1);
-    upload.remove(id);
-    expect(upload.items.value).toHaveLength(1);
     useStudio().sounds.value = [makeSound({ id: "s" })];
     await nextTick();
     upload.clearDone();
@@ -164,4 +164,40 @@ describe("useUpload", () => {
     expect(upload.items.value.at(-1)?.status).toBe("error");
     useStudio().state.value = null;
   });
+
+  it("adds unique queue items when randomUUID is unavailable on plain HTTP", () => {
+    vi.stubGlobal("crypto", { randomUUID: undefined });
+    const upload = useUpload();
+    upload.add([file("first.wav", 1), file("second.wav", 1)]);
+    expect(upload.items.value).toHaveLength(2);
+    expect(new Set(upload.items.value.map((item) => item.id)).size).toBe(2);
+    expect(upload.items.value.every((item) => item.status === "pending")).toBe(true);
+  });
+  it("marks a removed processing sound as an error and stops polling", async () => {
+    const upload = useUpload();
+    upload.items.value = [];
+    upload.add([file("a.wav", 1)]);
+    await upload.start(defaults);
+    useStudio().loaded.value = true;
+    useStudio().sounds.value = [makeSound({ id: "s", status: "processing" })];
+    await nextTick();
+    useStudio().sounds.value = [];
+    await nextTick();
+    expect(upload.items.value[0]).toMatchObject({ status: "error", error: "Sound was removed" });
+    vi.mocked(useStudio().refreshSounds).mockClear();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(useStudio().refreshSounds).not.toHaveBeenCalled();
+  });
+  it("allows removing processing rows and stops their polling", async () => {
+    const upload = useUpload();
+    upload.items.value = [];
+    upload.add([file("a.wav", 1)]);
+    await upload.start(defaults);
+    upload.remove(upload.items.value[0]!.id);
+    expect(upload.items.value).toHaveLength(0);
+    vi.mocked(useStudio().refreshSounds).mockClear();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(useStudio().refreshSounds).not.toHaveBeenCalled();
+  });
+
 });

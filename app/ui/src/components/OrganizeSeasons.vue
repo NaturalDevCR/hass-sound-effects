@@ -6,7 +6,7 @@ import EmptyState from "./EmptyState.vue";
 import { useI18n } from "@/i18n";
 import SeasonTimeline from "./SeasonTimeline.vue";
 import SeasonBadge from "./SeasonBadge.vue";
-defineProps<{ seasons: Season[]; pending: boolean }>();
+defineProps<{ seasons: Season[]; pending: boolean; actingId?: string | null }>();
 const emit = defineEmits<{
   create: [];
   edit: [value: Season];
@@ -21,7 +21,7 @@ const { t } = useI18n();
       {{ t("organize.newSeason") }}
     </button>
   </header>
-  <SeasonTimeline :seasons="seasons" />
+  <SeasonTimeline :seasons="seasons" :show-legend="false" />
   <EmptyState
     v-if="!seasons.length"
     :icon="mdiCalendarStar"
@@ -41,6 +41,9 @@ const { t } = useI18n();
         </p>
       </div>
       <div class="mt-1 flex justify-end gap-1">
+        <span class="mr-auto grid size-11 place-items-center">
+          <span v-if="actingId === season.id" role="status" :aria-label="t('common.loading')" class="size-4 animate-spin rounded-full border-2 border-muted border-t-transparent" />
+        </span>
         <button
           type="button"
           class="btn-ghost size-11 p-0!"
