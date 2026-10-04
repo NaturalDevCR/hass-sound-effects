@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, useId, watch } from "vue";
+import { computed, nextTick, reactive, ref, useId, watch } from "vue";
 import type { Recipe } from "@/api/types";
 import { useI18n } from "@/i18n";
 const props = defineProps<{ recipe: Recipe; duration: number; disabled: boolean }>();
@@ -10,42 +10,61 @@ type Side = "start" | "end";
 const sides: Side[] = ["start", "end"];
 const end = computed(() => props.recipe.trim_end ?? props.duration);
 const draft = reactive({ start: String(props.recipe.trim_start), end: String(end.value) });
+const invalid = reactive({ start: false, end: false });
 const focused = ref<Side | null>(null);
 const value = (side: Side) => (side === "start" ? props.recipe.trim_start : end.value);
 for (const side of sides) {
   watch(() => value(side), (next) => {
-    if (focused.value !== side) draft[side] = String(next);
+    if (focused.value !== side && !invalid[side]) draft[side] = String(next);
   });
 }
+function parse(side: Side): number | null {
+  const text = draft[side].trim().replace(",", ".");
+  return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text) && Number.isFinite(Number(text))
+    ? Number(text)
+    : null;
+}
+function edited(side: Side) {
+  invalid[side] = parse(side) === null;
+}
 function commit(side: Side, normalize = false) {
-  const text = draft[side].trim();
-  const number = Number(text);
-  if (text && Number.isFinite(number)) {
-    emit(
-      "trim",
-      side === "start" ? number : props.recipe.trim_start,
-      side === "end" ? number : end.value,
-    );
-  }
+  const number = parse(side);
+  invalid[side] = number === null;
+  if (number === null) return;
+  emit(
+    "trim",
+    side === "start" ? number : props.recipe.trim_start,
+    side === "end" ? number : end.value,
+  );
   if (normalize) {
-    // Props update after the emitted change has reached the parent.
-    queueMicrotask(() => {
-      draft[side] = String(value(side));
+    // Wait for the parent's recipe update before normalizing the committed draft.
+    const committedDraft = draft[side];
+    void nextTick(() => {
+      if (draft[side] === committedDraft && !invalid[side]) draft[side] = String(value(side));
     });
   }
 }
 function keydown(event: KeyboardEvent, side: Side) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    draft[side] = String(value(side));
+    invalid[side] = false;
+    return;
+  }
   if (event.key === "Enter") {
     event.preventDefault();
     commit(side, true);
     return;
   }
-  if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
+  if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
   event.preventDefault();
-  const step = (event.shiftKey ? 0.1 : 0.01) * (["ArrowUp", "ArrowRight"].includes(event.key) ? 1 : -1);
-  const number = draft[side].trim() && Number.isFinite(Number(draft[side]))
-    ? Number(draft[side])
-    : value(side);
+  const step = (event.shiftKey ? 0.1 : 0.01) * (event.key === "ArrowUp" ? 1 : -1);
+  const number = parse(side);
+  if (number === null) {
+    invalid[side] = true;
+    return;
+  }
   draft[side] = String(Number((number + step).toFixed(2)));
   commit(side, true);
 }
@@ -65,15 +84,21 @@ function keydown(event: KeyboardEvent, side: Side) {
         inputmode="decimal"
         role="spinbutton"
         :aria-valuenow="value(side)"
+        :aria-invalid="invalid[side]"
+        :aria-describedby="invalid[side] ? `${id}-${side}-error` : undefined"
         :aria-valuemin="side === 'start' ? 0 : recipe.trim_start"
         :aria-valuemax="side === 'start' ? end : duration"
         :disabled="disabled"
         class="field tabular-nums"
+        @input="edited(side)"
         @focus="focused = side"
         @change="commit(side)"
         @blur="focused = null; commit(side, true)"
         @keydown="keydown($event, side)"
       />
+      <p v-if="invalid[side]" :id="`${id}-${side}-error`" role="alert" class="mt-1 text-xs text-danger">
+        {{ t("editor.trimInvalid") }}
+      </p>
     </div>
   </div>
 </template>

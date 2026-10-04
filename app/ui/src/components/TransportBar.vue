@@ -58,7 +58,6 @@ watch(() => props.playing, (playing) => {
       >
     </div>
     <span aria-live="polite" class="sr-only">{{ announcement }}</span>
-    <p v-if="loop" class="mt-2 text-xs text-muted">{{ t("editor.loopHint") }}</p>
     <p class="mt-2 hidden text-xs text-muted md:block">{{ t("editor.shortcuts") }}</p>
   </div>
 </template>

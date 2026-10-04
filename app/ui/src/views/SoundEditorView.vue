@@ -36,8 +36,7 @@ const {
   saving,
   deleting,
   detailsSaving,
-  error,
-  detailsError,
+  actionError,
   detailsValid,
   canSave,
   previewPending,
@@ -45,7 +44,6 @@ const {
   previewAvailable,
   previewPlaying,
   previewHint,
-  previewError,
   auditionOpen,
   loaded,
 } = editor;
@@ -70,7 +68,7 @@ async function close() {
 function trim(start: number, finish: number) {
   editor.patchRecipe({
     trim_start: Number(start.toFixed(2)),
-    trim_end: Math.abs(finish - duration.value) < 0.005 ? null : Number(finish.toFixed(2)),
+    trim_end: finish >= duration.value - 0.0005 ? null : Number(finish.toFixed(2)),
   });
 }
 function shortcut(event: KeyboardEvent) {
@@ -88,11 +86,14 @@ function shortcut(event: KeyboardEvent) {
   const target = event.target;
   if (
     target instanceof HTMLElement &&
-    (target.closest('textarea,select,[contenteditable]:not([contenteditable="false"])') ||
-      (target instanceof HTMLInputElement && ["text", "number", "search", "email", "password", "tel", "url"].includes(target.type)))
+    (target.closest('textarea,[contenteditable]:not([contenteditable="false"])') ||
+      (target instanceof HTMLInputElement && ["text", "number", "search", "email", "password", "tel", "url", "date", "datetime-local", "month", "week", "time"].includes(target.type)))
   )
     return;
   if (event.key === " ") {
+    if (target instanceof HTMLElement && target.closest(
+      'button,a,[role="switch"],[role="radio"],input[type="checkbox"],input[type="radio"],select',
+    )) return;
     event.preventDefault();
     editor.audio.toggle();
   } else if (event.key.toLowerCase() === "l") loop.value = !loop.value;
@@ -178,7 +179,6 @@ onBeforeUnmount(() => document.removeEventListener("keydown", shortcut));
         :valid="detailsValid"
         :pending="detailsSaving"
         :blocked="saving || deleting"
-        :error="detailsError"
         @save="editor.saveDetails"
       />
     </div>
@@ -193,7 +193,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", shortcut));
         :preview-pending="previewPending"
         :preview-ready="previewReady"
         :preview-available="previewAvailable"
-        :error="previewError ?? error"
+        :error="actionError"
         :preview-playing="previewPlaying"
         :preview-hint="previewHint"
         :busy="busy"

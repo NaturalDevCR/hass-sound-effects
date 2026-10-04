@@ -26,18 +26,51 @@ export function gainSchedule(s: PreviewSettings): GainPoint[] {
   return points;
 }
 
+// Shared by seek automation and the Firefox stop fallback.
+function envelopeLevel(points: GainPoint[], elapsed: number): number {
+  let value = points[0]!.value;
+  for (let i = 1; i < points.length; i++) {
+    const previous = points[i - 1]!;
+    const next = points[i]!;
+    if (elapsed >= next.time) value = next.value;
+    else {
+      if (elapsed >= previous.time)
+        value = previous.value +
+          (next.value - previous.value) * (elapsed - previous.time) / (next.time - previous.time);
+      break;
+    }
+  }
+  return value;
+}
+export class AudioUnsupportedError extends Error {
+  constructor() {
+    super(translate("editor.audioUnsupported"));
+  }
+}
+type Pass = {
+  source: AudioBufferSourceNode;
+  gain: GainNode;
+  when: number;
+  offset: number;
+  endTime: number;
+};
+type AudioSession = { type: string };
+
 /** Shared context is allocated lazily; the editor calls load only after user activation. */
 let sharedContext: AudioContext | undefined;
 export class AudioEngine {
   private ctx?: AudioContext;
   private cache = new Map<string, Promise<AudioBuffer>>();
-  private source?: AudioBufferSourceNode;
-  private gain?: GainNode;
-  private startedAt = 0;
+  private passes: Pass[] = [];
+  private timer?: ReturnType<typeof setTimeout>;
+  private buffer?: AudioBuffer;
+  private points: GainPoint[] = [];
+  private looping = false;
   private offset = 0;
-  private end = 0;
   private start = 0;
-  private level = 1;
+  private end = 0;
+  private session?: AudioSession;
+  private previousSessionType?: string;
   private lifecycle = 0;
   onEnded?: () => void;
   onError?: (cause: unknown) => void;
@@ -45,15 +78,21 @@ export class AudioEngine {
     this.ctx = ctx;
   }
   private context(): AudioContext {
-    const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+    const session = (navigator as Navigator & { audioSession?: AudioSession }).audioSession;
     if (session) {
-      try { session.type = "playback"; } catch { /* Some browsers expose a read-only session. */ }
+      try {
+        if (!this.session) {
+          this.previousSessionType = session.type;
+          this.session = session;
+        }
+        session.type = "playback";
+      } catch { /* Some browsers expose a read-only session. */ }
     }
     if (!this.ctx) {
       const Audio =
         globalThis.AudioContext ??
         (globalThis as typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!Audio) throw new Error(translate("editor.audioUnsupported"));
+      if (!Audio) throw new AudioUnsupportedError();
       sharedContext ??= new Audio();
       this.ctx = sharedContext;
     }
@@ -87,17 +126,22 @@ export class AudioEngine {
     this.cache.clear();
   }
   async suspend(): Promise<void> {
-    const ticket = ++this.lifecycle;
     this.stop();
+    const ticket = this.lifecycle;
     this.clearCache();
+    if (this.session && this.previousSessionType !== undefined) {
+      try { this.session.type = this.previousSessionType; } catch { /* Read-only session. */ }
+      this.session = undefined;
+      this.previousSessionType = undefined;
+    }
     if (!this.ctx) return;
     // Let the stop ramp finish; a new play cancels this pending suspension.
     await new Promise((resolve) => setTimeout(resolve, 10));
     if (ticket === this.lifecycle) await this.ctx.suspend();
   }
   play(buffer: AudioBuffer, settings: PreviewSettings, opts: { loop?: boolean; from?: number } = {}): void {
-    const ticket = ++this.lifecycle;
     this.stop();
+    const ticket = this.lifecycle;
     const ctx = this.context();
     if (["suspended", "interrupted"].includes(ctx.state))
       void ctx.resume().catch((cause) => {
@@ -109,94 +153,117 @@ export class AudioEngine {
     const end = settings.bypass ? buffer.duration : Math.min(buffer.duration, settings.trimEnd);
     const offset = Math.max(start, Math.min(opts.from ?? start, end));
     if (end <= offset) return;
+    this.buffer = buffer;
+    this.start = start;
+    this.end = end;
+    this.offset = offset;
+    this.points = gainSchedule({ ...settings, trimStart: start, trimEnd: end });
+    this.looping = opts.loop ?? false;
+    this.schedulePass(ctx.currentTime, offset);
+    this.lookAhead();
+  }
+  private schedulePass(when: number, offset: number): void {
+    const ctx = this.ctx!;
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
-    source.buffer = buffer;
+    source.buffer = this.buffer!;
     source.connect(gain);
     gain.connect(ctx.destination);
-    const now = ctx.currentTime;
-    const elapsed = offset - start;
-    const points = gainSchedule({ ...settings, trimStart: start, trimEnd: end });
-    // Interpolate the envelope at a seek/restart, then schedule only remaining points.
-    let value = points[0]!.value;
-    for (let i = 1; i < points.length; i++) {
-      const previous = points[i - 1]!;
-      const next = points[i]!;
-      if (elapsed >= next.time) value = next.value;
-      else {
-        if (elapsed >= previous.time)
-          value =
-            previous.value +
-            ((next.value - previous.value) * (elapsed - previous.time)) / (next.time - previous.time);
-        break;
-      }
-    }
-    gain.gain.setValueAtTime(value, now);
-    for (const point of points)
-      if (point.time > elapsed) gain.gain.linearRampToValueAtTime(point.value, now + point.time - elapsed);
-    this.source = source;
-    this.gain = gain;
-    this.offset = offset;
-    this.end = end;
-    this.start = start;
-    this.level = settings.bypass ? 1 : 10 ** (settings.gainDb / 20);
-    source.loop = opts.loop ?? false;
-    source.loopStart = start;
-    source.loopEnd = end;
-    // Loop fades apply to the first pass only; restore steady gain at its boundary.
-    if (source.loop) gain.gain.setValueAtTime(this.level, now + end - offset);
-    this.startedAt = now;
+    const elapsed = offset - this.start;
+    gain.gain.setValueAtTime(envelopeLevel(this.points, elapsed), when);
+    for (const point of this.points)
+      if (point.time > elapsed) gain.gain.linearRampToValueAtTime(point.value, when + point.time - elapsed);
+    const pass = { source, gain, when, offset, endTime: when + this.end - offset };
     source.onended = () => {
       source.onended = null;
       source.disconnect();
       gain.disconnect();
-      if (this.source !== source) return;
-      this.source = undefined;
-      this.gain = undefined;
-      this.offset = end;
+      const index = this.passes.indexOf(pass);
+      if (index < 0) return;
+      this.passes.splice(index, 1);
+      if (this.passes.length) return;
+      clearTimeout(this.timer);
+      this.offset = this.end;
       this.onEnded?.();
     };
-    source.start(now, offset);
-    if (!source.loop) source.stop(now + end - offset);
+    try {
+      // Each pass owns its full envelope and ends exactly at the next pass's start.
+      source.start(when, offset, this.end - offset);
+      this.passes.push(pass);
+    } catch (cause) {
+      source.onended = null;
+      source.disconnect();
+      gain.disconnect();
+      throw cause;
+    }
+  }
+  private lookAhead(): void {
+    clearTimeout(this.timer);
+    while (this.looping && this.ctx) {
+      const tail = this.passes.at(-1);
+      if (!tail) return;
+      const delay = (tail.endTime - this.ctx.currentTime - 0.1) * 1000;
+      // Treat sub-ms rounding as due; short clips may need several passes in the horizon.
+      if (delay <= 1) {
+        this.schedulePass(tail.endTime, this.start);
+        continue;
+      }
+      this.timer = setTimeout(() => {
+        try { this.lookAhead(); }
+        catch (cause) { this.stop(); this.onError?.(cause); }
+      }, delay);
+      return;
+    }
   }
   setLoop(loop: boolean): void {
-    if (!this.source || !this.ctx || this.source.loop === loop) return;
-    const now = this.ctx.currentTime;
-    this.offset = this.position;
-    this.startedAt = now;
-    this.source.loop = loop;
-    // A later stop() replaces the existing scheduled stop (Web Audio contract).
-    this.source.stop(loop ? now + 1e9 : now + this.end - this.offset);
-    this.gain!.gain.cancelScheduledValues(now);
-    this.gain!.gain.setValueAtTime(this.level, now);
+    if (this.looping === loop) return;
+    this.looping = loop;
+    clearTimeout(this.timer);
+    if (loop) {
+      try { this.lookAhead(); }
+      catch (cause) { this.stop(); this.onError?.(cause); }
+    }
+    else if (this.ctx) {
+      // Withdraw only future passes; the audible pass keeps all its fade automation.
+      for (const pass of this.passes.filter((p) => p.when > this.ctx!.currentTime)) {
+        this.passes.splice(this.passes.indexOf(pass), 1);
+        pass.source.stop();
+      }
+    }
   }
   stop(): void {
+    this.lifecycle++;
+    clearTimeout(this.timer);
     this.offset = this.position;
-    const source = this.source;
-    const gain = this.gain;
-    if (source && gain && this.ctx) {
-      const now = this.ctx.currentTime;
-      if (gain.gain.cancelAndHoldAtTime) gain.gain.cancelAndHoldAtTime(now);
+    const now = this.ctx?.currentTime ?? 0;
+    for (const pass of this.passes) {
+      if (pass.when > now) pass.source.stop();
       else {
-        gain.gain.cancelScheduledValues(now);
-        gain.gain.setValueAtTime(gain.gain.value, now);
+        const param = pass.gain.gain;
+        if (param.cancelAndHoldAtTime) param.cancelAndHoldAtTime(now);
+        else {
+          const elapsed = pass.offset - this.start + now - pass.when;
+          const currentComputedLevel = envelopeLevel(this.points, elapsed);
+          param.cancelScheduledValues(now);
+          param.setValueAtTime(currentComputedLevel, now);
+          // Firefox's value getter is reliable only after resetting the automation.
+          const held = param.value;
+          if (!Number.isFinite(held)) param.setValueAtTime(currentComputedLevel, now);
+        }
+        param.linearRampToValueAtTime(0, now + 0.01);
+        pass.source.stop(now + 0.01);
       }
-      gain.gain.linearRampToValueAtTime(0, now + 0.01);
-      source.stop(now + 0.01);
-      // onended disconnects the retired nodes after the ramp, without ending a new source.
     }
-    this.source = undefined;
-    this.gain = undefined;
+    this.passes = [];
+    this.buffer = undefined;
   }
   get position(): number {
-    if (!this.source || !this.ctx) return this.offset;
-    const position = this.offset + this.ctx.currentTime - this.startedAt;
-    return this.source.loop
-      ? this.start + ((position - this.start) % (this.end - this.start))
-      : Math.min(this.end, position);
+    if (!this.ctx) return this.offset;
+    const pass = [...this.passes].reverse().find((p) => p.when <= this.ctx!.currentTime);
+    return pass ? Math.min(this.end, pass.offset + this.ctx.currentTime - pass.when) : this.offset;
   }
   get playing(): boolean {
-    return this.source !== undefined;
+    return this.passes.length > 0;
   }
 }
 export const audioEngine = new AudioEngine();

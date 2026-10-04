@@ -12,7 +12,6 @@ const props = defineProps<{
   valid: boolean;
   pending: boolean;
   blocked?: boolean;
-  error: string | null;
 }>();
 const emit = defineEmits<{
   "update:modelValue": [value: EditorDetails];
@@ -97,7 +96,6 @@ function change(patch: Partial<EditorDetails>) {
       </div>
     </fieldset>
     <p v-if="!valid" role="alert" class="text-sm text-warn">{{ t("editor.detailsInvalid") }}</p>
-    <p v-if="error" role="alert" class="text-sm break-words text-danger">{{ error }}</p>
     <button
       data-test="save-details"
       type="submit"

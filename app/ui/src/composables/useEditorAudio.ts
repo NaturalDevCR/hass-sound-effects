@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from "vue";
 import { audioUrl } from "@/api/client";
 import type { Recipe } from "@/api/types";
-import { audioEngine as engine } from "@/lib/audioEngine";
+import { AudioUnsupportedError, audioEngine as engine } from "@/lib/audioEngine";
 import { translate } from "@/i18n";
 import { computePeaks } from "@/lib/peaks";
 import { usePlayer } from "./usePlayer";
@@ -47,7 +47,8 @@ export function useEditorAudio(
         Math.min(1800, decoded.length || 1800),
       );
     } catch (cause) {
-      if (ticket === generation && !disposed) error.value = translate("editor.decodeError");
+      if (ticket === generation && !disposed)
+        error.value = translate(cause instanceof AudioUnsupportedError ? "editor.audioUnsupported" : "editor.decodeError");
     } finally {
       if (ticket === generation) loading.value = false;
     }
@@ -80,7 +81,7 @@ export function useEditorAudio(
       animate();
     } catch (cause) {
       stop();
-      error.value = translate("editor.decodeError");
+      error.value = translate(cause instanceof AudioUnsupportedError ? "editor.audioUnsupported" : "editor.playbackError");
     }
   }
   function toggle() {
@@ -149,7 +150,7 @@ export function useEditorAudio(
     };
     engine.onError = (cause) => {
       stop();
-      error.value = translate("editor.decodeError");
+      error.value = translate(cause instanceof AudioUnsupportedError ? "editor.audioUnsupported" : "editor.playbackError");
     };
     document.addEventListener("pointerdown", activate);
     document.addEventListener("keydown", activate);

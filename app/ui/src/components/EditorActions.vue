@@ -30,7 +30,7 @@ const { t } = useI18n();
       {{ t(previewAvailable ? "editor.previewReady" : "editor.previewStale") }}
     </p>
     <button v-if="previewReady" data-test="play-preview" class="btn min-h-11! w-full" @click="emit('playPreview')">
-      {{ t(previewPlaying ? "editor.stopPreview" : "editor.playPreview") }}
+      {{ t(previewPlaying ? "editor.stopPreview" : previewAvailable ? "editor.playPreview" : "editor.playLastRender") }}
     </button>
     <p v-if="previewReady && previewHint" class="text-xs text-muted">{{ t("editor.previewPlayHint") }}</p>
     <p v-if="busy" class="text-xs text-muted">{{ t("editor.busy") }}</p>

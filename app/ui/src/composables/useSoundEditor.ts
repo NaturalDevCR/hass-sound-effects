@@ -70,7 +70,6 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
   const deleting = ref(false);
   const detailsSaving = ref(false);
   const error = ref<string | null>(null);
-  const detailsError = ref<string | null>(null);
   const detailsValid = computed(
     () =>
       !!effectiveDetails.value.title &&
@@ -90,6 +89,13 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
   watch(audio.playing, (playing) => {
     if (playing) previews.stopPreview();
   });
+  const actionError = computed(() => error.value ?? previews.previewError.value);
+  function clearActionError() {
+    error.value = null;
+    previews.previewError.value = null;
+  }
+  // Preview jobs can finish after another action; the latest failure owns the area.
+  watch(previews.previewError, (next) => { if (next) error.value = null; }, { flush: "sync" });
   const auditionOpen = ref(false);
   let initializedId = "";
   let disposed = false;
@@ -105,7 +111,6 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
         details.value = detailsOf(next);
         tagDraft.value = "";
         error.value = null;
-        detailsError.value = null;
       } else {
         if (!recipeDirty.value) recipe.value = { ...next.recipe };
         if (!detailsDirty.value) details.value = detailsOf(next);
@@ -130,7 +135,7 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
   async function save() {
     if (!canSave.value) return;
     saving.value = true;
-    error.value = null;
+    clearActionError();
     const snapshot = { ...recipe.value };
     const soundId = id.value;
     try {
@@ -141,6 +146,7 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
       toast.push(t("editor.publishQueued"), "success");
       await Promise.all([jobs.refresh(), studio.refreshSounds()]);
     } catch (cause) {
+      previews.previewError.value = null;
       error.value = messageOf(cause);
     } finally {
       saving.value = false;
@@ -150,7 +156,7 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
     if (!detailsDirty.value || !detailsValid.value || detailsSaving.value || saving.value || deleting.value)
       return;
     detailsSaving.value = true;
-    detailsError.value = null;
+    clearActionError();
     const snapshot = {
       ...effectiveDetails.value,
       seasons: [...details.value.seasons],
@@ -169,13 +175,15 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
       toast.push(t("editor.detailsSaved"), "success");
       await studio.refreshSounds();
     } catch (cause) {
-      detailsError.value = messageOf(cause);
+      previews.previewError.value = null;
+      error.value = messageOf(cause);
     } finally {
       detailsSaving.value = false;
     }
   }
   function preview() {
     if (!valid.value || deleting.value) return;
+    clearActionError();
     return previews.preview();
   }
   function guard(): Promise<boolean> {
@@ -194,6 +202,7 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
   }
   async function remove(close: () => Promise<unknown> | void) {
     if (deleting.value || saving.value || detailsSaving.value) return;
+    clearActionError();
     if (
       !(await useConfirm().confirm({
         title: t("editor.deleteTitle", { title: sound.value?.title ?? "" }),
@@ -204,7 +213,7 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
     )
       return;
     deleting.value = true;
-    error.value = null;
+    clearActionError();
     try {
       await ui.sounds.remove(id.value);
       deleted = true;
@@ -213,12 +222,14 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
       await studio.refreshSounds();
       toast.push(t("editor.deleted"), "success");
     } catch (cause) {
+      previews.previewError.value = null;
       error.value = messageOf(cause);
     } finally {
       deleting.value = false;
     }
   }
   function revert() {
+    clearActionError();
     recipe.value = { ...savedRecipe.value };
   }
   function beforeUnload(event: BeforeUnloadEvent) {
@@ -248,8 +259,7 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
     saving,
     deleting,
     detailsSaving,
-    error,
-    detailsError,
+    actionError,
     detailsValid,
     canSave,
     ...previews,

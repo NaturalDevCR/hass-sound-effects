@@ -2,6 +2,7 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { defineComponent, h, ref } from "vue";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useEditorAudio } from "./useEditorAudio";
+import { AudioUnsupportedError } from "@/lib/audioEngine";
 import { IDENTITY } from "@/lib/recipe";
 const engine = vi.hoisted(() => ({
   clearCache: vi.fn(),
@@ -12,8 +13,11 @@ const engine = vi.hoisted(() => ({
   stop: vi.fn(),
   position: 0,
   playing: false,
+  onError: undefined as ((cause: unknown) => void) | undefined,
 }));
-vi.mock("@/lib/audioEngine", () => ({ audioEngine: engine }));
+vi.mock("@/lib/audioEngine", async (original) => ({
+  ...(await original<typeof import("@/lib/audioEngine")>()), audioEngine: engine,
+}));
 vi.mock("./usePlayer", () => ({ usePlayer: () => ({ stop: vi.fn() }) }));
 let wrapper: VueWrapper;
 const buffer = {
@@ -138,4 +142,28 @@ it("toggles looping during playback without debouncing or restarting", async () 
   expect(engine.setLoop).toHaveBeenCalledWith(true);
   await vi.advanceTimersByTimeAsync(80);
   expect(engine.play).toHaveBeenCalledOnce();
+});
+
+it("distinguishes decode, synchronous playback, and asynchronous resume errors", async () => {
+  engine.load.mockRejectedValueOnce(new Error("Decode failed"));
+  const { audio } = await open();
+  expect(audio.error.value).toBe("Could not decode this audio. Try again.");
+  await audio.decode();
+  engine.play.mockImplementationOnce(() => { throw new Error("Start failed"); });
+  audio.play();
+  expect(audio.error.value).toBe("Could not play this audio. Try again.");
+  audio.play();
+  expect(audio.error.value).toBeNull();
+  engine.onError?.(new Error("Resume rejected"));
+  expect(audio.error.value).toBe("Could not play this audio. Try again.");
+  expect(audio.playing.value).toBe(false);
+});
+it("keeps the unsupported Web Audio message for load and play failures", async () => {
+  engine.load.mockRejectedValueOnce(new AudioUnsupportedError());
+  const { audio } = await open();
+  expect(audio.error.value).toBe("This browser cannot play live audio previews.");
+  await audio.decode();
+  engine.play.mockImplementationOnce(() => { throw new AudioUnsupportedError(); });
+  audio.play();
+  expect(audio.error.value).toBe("This browser cannot play live audio previews.");
 });
