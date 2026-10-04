@@ -1,0 +1,131 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Conectar con Sound Effects Studio",
+        "description": "Introduce el host, el puerto y el token de API de Studio. Para reconectar después de cambiar el token, introduce el token nuevo.",
+        "data": {
+          "host": "Host",
+          "port": "Puerto",
+          "token": "Token de API"
+        }
+      },
+      "hassio_confirm": {
+        "title": "Sound Effects Studio detectado",
+        "description": "¿Conectar con la aplicación {addon}?"
+      },
+      "reconfigure": {
+        "title": "Reconfigurar Sound Effects Studio",
+        "description": "Actualiza el host, el puerto y el token de API de Studio.",
+        "data": {
+          "host": "Host",
+          "port": "Puerto",
+          "token": "Token de API"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se pudo conectar con Sound Effects Studio.",
+      "invalid_auth": "El token de API fue rechazado.",
+      "invalid_host": "Introduce un host que no esté vacío."
+    },
+    "abort": {
+      "already_configured": "Esta instancia de Studio ya está configurada.",
+      "already_in_progress": "La configuración de esta instancia de Studio ya está en curso.",
+      "cannot_connect": "No se pudo verificar la instancia de Studio detectada.",
+      "single_instance_allowed": "Solo se puede configurar una instancia de Sound Effects Studio.",
+      "reauth_successful": "El token de API se actualizó.",
+      "unique_id_mismatch": "Esta dirección pertenece a otra instancia de Studio.",
+      "invalid_discovery_info": "La información de detección de Studio no es válida.",
+      "invalid_auth": "El token de API detectado fue rechazado.",
+      "reconfigure_successful": "La conexión con Studio se actualizó."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opciones de Sound Effects",
+        "description": "Configura la URL de audio, la entidad de temporada opcional y el intervalo de actualización del catálogo.",
+        "data": {
+          "public_base_url": "URL pública base de Home Assistant",
+          "season_entity": "Entidad de temporada",
+          "scan_interval": "Intervalo de actualización (segundos)"
+        },
+        "data_description": {
+          "public_base_url": "Deja el campo vacío para usar la URL configurada en Home Assistant.",
+          "season_entity": "Entidad opcional cuyo estado coincide con el ID o el nombre de una temporada.",
+          "scan_interval": "Tiempo entre actualizaciones de Studio, de 10 a 3600 segundos."
+        }
+      }
+    }
+  },
+  "services": {
+    "select": {
+      "name": "Seleccionar sonido",
+      "description": "Selecciona un sonido del catálogo guardado localmente sin repetir hasta haber reproducido todos los sonidos disponibles. Devuelve los datos del audio para usarlos en automatizaciones.",
+      "fields": {
+        "category": {
+          "name": "Categoría",
+          "description": "ID o nombre de la categoría de la que se seleccionará el sonido."
+        },
+        "tags": {
+          "name": "Etiquetas",
+          "description": "Exige todas las etiquetas indicadas. Acepta una lista o texto separado por comas."
+        },
+        "season": {
+          "name": "Temporada",
+          "description": "ID o nombre de la temporada para esta selección. Si se omite, usa la temporada activa. Si no hay sonidos que coincidan, usa la temporada regular."
+        },
+        "dry_run": {
+          "name": "Simular selección",
+          "description": "Prueba una selección sin cambiar el historial, emitir un evento ni informar a Studio."
+        }
+      }
+    },
+    "reset_history": {
+      "name": "Restablecer historial",
+      "description": "Borra las bolsas de reproducción aleatoria de una categoría, o de todas si se omite. Conserva los últimos sonidos seleccionados.",
+      "fields": {
+        "category": {
+          "name": "Categoría",
+          "description": "ID o nombre de la categoría (opcional). Si se omite, restablece todas las categorías."
+        }
+      }
+    },
+    "refresh": {
+      "name": "Actualizar catálogo",
+      "description": "Solicita el catálogo más reciente a Sound Effects Studio. La selección local sigue disponible aunque Studio esté desconectado."
+    }
+  },
+  "exceptions": {
+    "unknown_category": {
+      "message": "La categoría solicitada {category} no existe."
+    },
+    "unknown_season": {
+      "message": "La temporada solicitada {season} no existe."
+    },
+    "no_eligible_sound": {
+      "message": "No hay sonidos que cumplan los criterios en la categoría {category}."
+    },
+    "not_loaded": {
+      "message": "Sound Effects no está cargado. Configura la integración antes de usar esta acción."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "active_season": {
+        "name": "Temporada activa"
+      }
+    },
+    "select": {
+      "season_override": {
+        "name": "Temporada manual"
+      }
+    },
+    "binary_sensor": {
+      "connected": {
+        "name": "Conectado"
+      }
+    }
+  }
+}

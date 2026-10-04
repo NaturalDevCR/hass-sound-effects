@@ -1,0 +1,27 @@
+select:
+  fields:
+    category:
+      required: true
+      example: intro
+      selector:
+        text:
+    tags:
+      example: [es]
+      selector:
+        text:
+          multiple: true
+    season:
+      example: halloween
+      selector:
+        text:
+    dry_run:
+      default: false
+      selector:
+        boolean:
+reset_history:
+  fields:
+    category:
+      example: intro
+      selector:
+        text:
+refresh:
