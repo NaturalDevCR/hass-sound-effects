@@ -195,7 +195,9 @@ class JobQueue:
                     await asyncio.shield(copy)
                 except asyncio.CancelledError:
                     # The thread cannot be cancelled; settle it before removing its output.
-                    await copy
+                    # A copy failure here must not replace the cancellation.
+                    with suppress(Exception):
+                        await copy
                     raise
             else:
 
@@ -226,8 +228,14 @@ class JobQueue:
             filename = self._publisher.commit(tmp, sound.id, revision)
             final = self._publisher.published_path(filename)
             # Retention starts when the previous revision becomes superseded.
-            with suppress(FileNotFoundError):
+            try:
                 os.utime(self._publisher.published_path(f"{sound.id}-r{revision - 1}.mp3"))
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                _LOGGER.warning(
+                    "Could not refresh retention of %s r%s: %s", sound.id, revision - 1, exc
+                )
             loudness_lufs = true_peak_db = None
             try:
                 measured = await media.measure_loudness(final)

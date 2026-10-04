@@ -508,3 +508,48 @@ async def test_copy_runs_off_loop_and_cancellation_settles_output(
         assert repo.get_sound(sound.id).published is None
     finally:
         release.set()
+
+
+async def test_copy_failure_during_stop_still_cancels(queue, repo, paths, make_tone, monkeypatch):
+    sound = add_sound(repo, paths, make_tone(name="copyfail.mp3", seconds=1))
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+
+    def failing_copy(src, dst):
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(5)
+        raise OSError("disk full")
+
+    monkeypatch.setattr(shutil, "copyfile", failing_copy)
+    job = queue.enqueue_import(sound.id)
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        stop = asyncio.create_task(queue.stop())
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.wait_for(stop, 5)
+        assert job.status == "failed" and job.error == "cancelled"
+        assert not list(paths.publish_dir.glob(".tmp-*"))
+    finally:
+        release.set()
+
+
+async def test_retention_touch_failure_does_not_fail_publish(
+    queue, repo, paths, make_tone, monkeypatch
+):
+    sound = add_sound(repo, paths, make_tone(name="touch.wav", seconds=1))
+    queue.enqueue_import(sound.id)
+    await queue.wait_idle()
+    real_utime = os.utime
+
+    def denied(path, *args, **kwargs):
+        if str(path).endswith("-r1.mp3"):
+            raise PermissionError("denied")
+        return real_utime(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "utime", denied)
+    job = queue.enqueue_publish(sound.id)
+    await queue.wait_idle()
+    assert job.status == "done"
+    assert repo.get_sound(sound.id).published.revision == 2

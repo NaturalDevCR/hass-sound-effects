@@ -100,6 +100,7 @@ class Publisher:
     def audition_copy(self, src: Path, sound_id: str) -> str:
         name = f"{sound_id}-{secrets.token_hex(4)}.mp3"
         directory = self.paths.publish_dir / "_audition"
+        directory.mkdir(parents=True, exist_ok=True)
         tmp = directory / f".{name}"
         try:
             shutil.copyfile(src, tmp)
