@@ -26,6 +26,7 @@ from .notifier import CatalogNotifier
 from .publisher import Publisher
 from .repository import Repository
 from .supervisor import SupervisorClient
+from .uploads import UploadStore
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ def create_app(
         state.repo = repo
         state.publisher = publisher
         state.jobs = JobQueue(repo, publisher, paths)
+        state.uploads = UploadStore(paths, lambda: repo.get_settings().max_upload_mb * 1024 * 1024)
         state.tokens = TokenStore(paths.data_dir / "api_token")
         state.supervisor = supervisor if supervisor is not None else SupervisorClient(None)
         state.notifier = None
