@@ -1,0 +1,5 @@
+ui/node_modules
+ui/dist
+**/__pycache__
+**/*.pyc
+src/sound_effects_studio/static
