@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { messageOf, ui } from "@/api/client";
 import type { Category, Season, Profile } from "@/api/types";
 import OrganizeCategories from "@/components/OrganizeCategories.vue";
@@ -21,6 +21,7 @@ type Editor =
   | { kind: "categories"; value?: Category }
   | { kind: "seasons"; value?: Season }
   | { kind: "profiles"; value?: Profile };
+const categoryList = ref<InstanceType<typeof OrganizeCategories> | null>(null);
 const tab = ref<Tab>("categories");
 const editor = ref<Editor | null>(null);
 const formBusy = ref(false);
@@ -73,6 +74,10 @@ async function reorder(index: number, delta: number): Promise<void> {
   } finally {
     pending.value = false;
     acting.value = null;
+  }
+  if (!error.value) {
+    await nextTick();
+    categoryList.value?.focusReorder(moved.id, delta);
   }
 }
 async function remove(kind: Tab, value: Category | Season | Profile): Promise<void> {
@@ -141,7 +146,7 @@ async function remove(kind: Tab, value: Category | Season | Profile): Promise<vo
       </div>
       <p
         v-if="error"
-        role="alert"
+        data-test="organize-error"
         class="rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm break-words text-danger"
       >
         {{ error }}
@@ -156,6 +161,7 @@ async function remove(kind: Tab, value: Category | Season | Profile): Promise<vo
           :class="tab === 'categories' ? 'block' : 'hidden xl:block'"
         >
           <OrganizeCategories
+            ref="categoryList"
             :categories="categories"
             :pending="pending"
             :acting-id="acting?.kind === 'categories' ? acting.id : null"

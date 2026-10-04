@@ -7,7 +7,8 @@ import DropZone from "@/components/DropZone.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import SeasonPicker, { type SeasonSelection } from "@/components/SeasonPicker.vue";
 import TagEditor from "@/components/TagEditor.vue";
-import ProfilePicker, { CATEGORY_DEFAULT } from "@/components/ProfilePicker.vue";
+import ProfilePicker from "@/components/ProfilePicker.vue";
+import { CATEGORY_DEFAULT } from "@/lib/profiles";
 import UploadRow from "@/components/UploadRow.vue";
 import Sheet from "@/components/Sheet.vue";
 import { useUpload } from "@/composables/useUpload";
@@ -65,6 +66,7 @@ watch(
 const defaultsOpen = ref(false);
 const newCategory = ref(false);
 const categoryBusy = ref(false);
+const showBar = computed(() => busy.value || items.value.some((item) => ["pending", "uploading", "processing"].includes(item.status)));
 const count = computed(() => items.value.filter((i) => i.status === "pending").length);
 const valid = computed(() => !!category.value && (seasons.value.all_seasons || seasons.value.seasons.length > 0));
 function upload(): void {
@@ -86,7 +88,7 @@ function created(value: Category): void {
 <template>
   <section
     class="min-w-0 space-y-4"
-    :style="{ paddingBottom: items.length ? `${barHeight + 24}px` : undefined }"
+    :style="{ paddingBottom: loaded && showBar ? `${barHeight + 24}px` : undefined }"
     aria-labelledby="upload-heading"
   >
     <h2 id="upload-heading" class="text-xl font-semibold">
@@ -173,7 +175,7 @@ function created(value: Category): void {
       </div>
     </div>
     <div
-      v-if="loaded && items.length"
+      v-if="loaded && showBar"
       ref="bar"
       data-test="upload-bar"
       class="fixed inset-x-0 bottom-[var(--tabbar-h)] z-30 border-t border-line bg-surface/95 px-4 pt-3 pb-3 md:pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur md:left-60 md:px-6"

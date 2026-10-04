@@ -1,6 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it } from "vitest";
-import ProfilePicker, { CATEGORY_DEFAULT } from "@/components/ProfilePicker.vue";
+import ProfilePicker from "@/components/ProfilePicker.vue";
+import { CATEGORY_DEFAULT } from "@/lib/profiles";
 import { useStudio } from "@/composables/useStudio";
 import { useI18n } from "@/i18n";
 import { makeProfile } from "@/test/factories";

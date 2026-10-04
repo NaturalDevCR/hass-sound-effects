@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import type { Category } from "@/api/types";
 import { mdiPencilOutline, mdiTrashCanOutline, mdiFolderMusicOutline, mdiChevronUp, mdiChevronDown } from "@mdi/js";
 import Icon from "./Icon.vue";
@@ -13,6 +14,15 @@ const emit = defineEmits<{
   reorder: [index: number, delta: number];
 }>();
 const { t } = useI18n();
+const list = ref<HTMLElement | null>(null);
+function focusReorder(id: string, delta: number): void {
+  const buttons = Array.from(list.value?.querySelectorAll<HTMLButtonElement>("button[data-direction]") ?? [])
+    .filter((button) => button.dataset.categoryId === id);
+  const same = buttons.find((button) => button.dataset.direction === String(delta));
+  const target = same && !same.disabled ? same : buttons.find((button) => !button.disabled);
+  target?.focus();
+}
+defineExpose({ focusReorder });
 </script>
 <template>
   <header class="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -30,7 +40,7 @@ const { t } = useI18n();
       {{ t("organize.newCategory") }}
     </button></EmptyState
   >
-  <ul v-else class="space-y-3">
+  <ul v-else ref="list" class="space-y-3">
     <li v-for="(category, index) in categories" :key="category.id" class="rounded-lg border border-line bg-ground p-3">
       <div class="flex min-w-0 items-center gap-3">
         <span class="grid size-11 shrink-0 place-items-center rounded-lg bg-raised" :style="{ color: category.color }"
@@ -50,6 +60,8 @@ const { t } = useI18n();
         <button
           type="button"
           class="btn-ghost size-11 p-0!"
+          :data-category-id="category.id"
+          data-direction="-1"
           :disabled="pending || index === 0"
           :aria-label="t('organize.up', { name: category.name })"
           @click="emit('reorder', index, -1)"
@@ -59,6 +71,8 @@ const { t } = useI18n();
         <button
           type="button"
           class="btn-ghost size-11 p-0!"
+          :data-category-id="category.id"
+          data-direction="1"
           :disabled="pending || index === categories.length - 1"
           :aria-label="t('organize.down', { name: category.name })"
           @click="emit('reorder', index, 1)"

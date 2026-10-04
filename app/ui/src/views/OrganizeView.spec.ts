@@ -13,6 +13,7 @@ vi.mock("@/composables/useStudio", async (original) => {
   return { ...actual, useStudio: () => ({ ...actual.useStudio(), refresh }) };
 });
 beforeEach(() => {
+  vi.mocked(useStudio().refresh).mockReset().mockResolvedValue(undefined);
   useI18n().setLocale("en");
   useToast().toasts.value = [];
   useStudio().loaded.value = true;
@@ -36,7 +37,9 @@ it("confirms deletion and displays the server's 409 detail", async () => {
   expect(w.get('button[aria-label="Delete a"]').attributes("disabled")).toBeUndefined();
   useConfirm().answer(true);
   await flushPromises();
-  expect(w.get('[role="alert"]').text()).toBe("Category still contains sounds");
+  expect(w.get('[data-test="organize-error"]').text()).toBe("Category still contains sounds");
+  expect(w.find('[role="alert"]').exists()).toBe(false);
+  expect(w.get('[data-test="organize-error"]').attributes("aria-live")).toBeUndefined();
   expect(useToast().toasts.value.at(-1)).toMatchObject({ kind: "error", message: "Category still contains sounds" });
   expect(w.find('button[aria-label="Delete regular"]').exists()).toBe(false);
 });
@@ -66,7 +69,37 @@ it("shows reorder failures inline and as an error toast with a row spinner", asy
   expect(w.get('[role="status"]').element.closest("li")?.textContent).toContain("a");
   reject(new Error("Reorder unavailable"));
   await flushPromises();
-  expect(w.get('[role="alert"]').text()).toBe("Reorder unavailable");
+  expect(w.get('[data-test="organize-error"]').text()).toBe("Reorder unavailable");
+  expect(w.find('[role="alert"]').exists()).toBe(false);
+  expect(w.get('[data-test="organize-error"]').attributes("aria-live")).toBeUndefined();
   expect(useToast().toasts.value.at(-1)).toMatchObject({ kind: "error", message: "Reorder unavailable" });
   expect(w.find('[role="status"]').exists()).toBe(false);
+});
+
+it.each([
+  { index: 0, delta: 1, expected: "down" },
+  { index: 2, delta: -1, expected: "up" },
+  { index: 1, delta: -1, expected: "down" },
+  { index: 1, delta: 1, expected: "up" },
+])("restores focus to the moved row after refresh: %s", async ({ index, delta, expected }) => {
+  useStudio().categories.value = ["a", "b", "c"].map((id) => makeCategory({ id }));
+  const moved = useStudio().categories.value[index]!;
+  let reordered: string[] = [];
+  vi.spyOn(ui.categories, "reorder").mockImplementation(async (ids) => { reordered = ids; return []; });
+  vi.mocked(useStudio().refresh).mockImplementationOnce(async () => {
+    const byId = new Map(useStudio().categories.value.map((category) => [category.id, category]));
+    useStudio().categories.value = reordered.map((id) => byId.get(id)!);
+  });
+  const w = mount(OrganizeView, { attachTo: document.body });
+  try {
+    const button = w.get(`button[aria-label="Move ${moved.name} ${delta === 1 ? "down" : "up"}"]`);
+    (button.element as HTMLButtonElement).focus();
+    await button.trigger("click");
+    await flushPromises();
+    const target = w.get(`button[aria-label="Move ${moved.name} ${expected}"]`);
+    expect(target.attributes("disabled")).toBeUndefined();
+    expect(document.activeElement).toBe(target.element);
+  } finally {
+    w.unmount();
+  }
 });

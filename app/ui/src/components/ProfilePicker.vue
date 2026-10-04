@@ -1,10 +1,6 @@
-<script lang="ts">
-/** Emitted when "Category default" is chosen (only offered with `allowCategoryDefault`). */
-export const CATEGORY_DEFAULT = "__category_default__";
-</script>
-
 <script setup lang="ts">
 import { computed, useId } from "vue";
+import { CATEGORY_DEFAULT } from "@/lib/profiles";
 import { useStudio } from "@/composables/useStudio";
 import { useI18n } from "@/i18n";
 import { formatLufs } from "@/lib/format";

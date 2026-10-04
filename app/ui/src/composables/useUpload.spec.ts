@@ -12,15 +12,16 @@ vi.mock("@/composables/useStudio", async (original) => {
   };
 });
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { flushPromises } from "@vue/test-utils";
 import { nextTick } from "vue";
-import { ui } from "@/api/client";
+import { ApiError, ui } from "@/api/client";
 import { useStudio } from "./useStudio";
 import { useJobs } from "./useJobs";
 import { useUpload } from "./useUpload";
 import { makeSound } from "@/test/factories";
 vi.mock("@/api/client", async (original) => ({
   ...(await original<typeof import("@/api/client")>()),
-  ui: { uploads: { create: vi.fn(), chunk: vi.fn(), complete: vi.fn() } },
+  ui: { sounds: { get: vi.fn() }, uploads: { create: vi.fn(), chunk: vi.fn(), complete: vi.fn() } },
 }));
 const defaults = {
   category_id: "general",
@@ -36,6 +37,7 @@ describe("useUpload", () => {
     useUpload().items.value = [];
     useStudio().loaded.value = false;
     useStudio().sounds.value = [];
+    vi.mocked(ui.sounds.get).mockResolvedValue(makeSound({ id: "s", status: "processing" }));
     vi.mocked(ui.uploads.create).mockResolvedValue({
       upload_id: "u",
       chunk_size: 4194304,
@@ -181,9 +183,11 @@ describe("useUpload", () => {
     useStudio().loaded.value = true;
     useStudio().sounds.value = [makeSound({ id: "s", status: "processing" })];
     await nextTick();
+    vi.mocked(ui.sounds.get).mockRejectedValueOnce(new ApiError(404, "Not found"));
     useStudio().sounds.value = [];
-    await nextTick();
-    expect(upload.items.value[0]).toMatchObject({ status: "error", error: "Sound was removed" });
+    await flushPromises();
+    expect(ui.sounds.get).toHaveBeenCalledWith("s");
+    expect(upload.items.value[0]).toMatchObject({ status: "error", error: "Sound was removed", retryable: false });
     vi.mocked(useStudio().refreshSounds).mockClear();
     await vi.advanceTimersByTimeAsync(5000);
     expect(useStudio().refreshSounds).not.toHaveBeenCalled();
@@ -198,6 +202,65 @@ describe("useUpload", () => {
     vi.mocked(useStudio().refreshSounds).mockClear();
     await vi.advanceTimersByTimeAsync(5000);
     expect(useStudio().refreshSounds).not.toHaveBeenCalled();
+  });
+
+  it("confirms a stale list that started before completion without failing the import", async () => {
+    const upload = useUpload();
+    upload.add([file("a.wav", 1)]);
+    let applyStale!: () => void;
+    const staleRefresh = new Promise<void>((resolve) => {
+      applyStale = () => { useStudio().sounds.value = []; resolve(); };
+    });
+    await upload.start(defaults);
+    useStudio().loaded.value = true;
+    applyStale();
+    await staleRefresh;
+    await flushPromises();
+    expect(ui.sounds.get).toHaveBeenCalledWith("s");
+    expect(upload.items.value[0]).toMatchObject({ status: "processing", error: null });
+  });
+  it.each(["ready", "failed"] as const)("applies confirmed sound status %s", async (status) => {
+    const upload = useUpload();
+    upload.add([file("a.wav", 1)]);
+    await upload.start(defaults);
+    vi.mocked(ui.sounds.get).mockResolvedValueOnce(makeSound({ id: "s", status, error: "decode failed" }));
+    useStudio().sounds.value = [];
+    await flushPromises();
+    expect(upload.items.value[0]?.status).toBe(status === "ready" ? "done" : "error");
+    if (status === "failed") expect(upload.items.value[0]?.error).toBe("decode failed");
+  });
+  it.each([new ApiError(503, "Unavailable"), new Error("Offline"), { status: 404 }])(
+    "ignores unconfirmed removal errors and retries on the next poll: %s", async (cause) => {
+      const upload = useUpload();
+      upload.add([file("a.wav", 1)]);
+      await upload.start(defaults);
+      vi.mocked(ui.sounds.get).mockRejectedValueOnce(cause);
+      useStudio().sounds.value = [];
+      await flushPromises();
+      expect(upload.items.value[0]).toMatchObject({ status: "processing", error: null });
+      vi.mocked(useStudio().refreshSounds).mockImplementationOnce(async () => { useStudio().sounds.value = []; });
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(ui.sounds.get).toHaveBeenCalledTimes(2);
+      expect(upload.items.value[0]?.status).toBe("processing");
+    },
+  );
+  it("allows only one confirmation per item and ignores a response after the row was removed", async () => {
+    const upload = useUpload();
+    upload.add([file("a.wav", 1)]);
+    await upload.start(defaults);
+    let reject!: (cause: Error) => void;
+    vi.mocked(ui.sounds.get).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    useStudio().sounds.value = [];
+    await nextTick();
+    useStudio().sounds.value = [];
+    await nextTick();
+    expect(ui.sounds.get).toHaveBeenCalledTimes(1);
+    const item = upload.items.value[0]!;
+    upload.remove(item.id);
+    reject(new ApiError(404, "Not found"));
+    await flushPromises();
+    expect(item.status).toBe("processing");
+    expect(upload.items.value).toHaveLength(0);
   });
 
 });

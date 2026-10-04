@@ -1,3 +1,8 @@
+vi.mock("@/composables/useUpload", async (original) => {
+  const actual = await original<typeof import("@/composables/useUpload")>();
+  const start = vi.fn().mockResolvedValue(undefined);
+  return { ...actual, useUpload: () => ({ ...actual.useUpload(), start }) };
+});
 vi.mock("@/composables/useStudio", async (original) => {
   const actual = await original<typeof import("@/composables/useStudio")>();
   return { ...actual, useStudio: () => ({ ...actual.useStudio(), refresh: vi.fn(), refreshSounds: vi.fn() }) };
@@ -7,10 +12,13 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import UploadView from "./UploadView.vue";
 import { useUpload } from "@/composables/useUpload";
 import { useStudio } from "@/composables/useStudio";
+import { CATEGORY_DEFAULT } from "@/lib/profiles";
 import { useI18n } from "@/i18n";
 import { makeCategory, makeSeason, makeProfile } from "@/test/factories";
 const wrappers: ReturnType<typeof mount>[] = [];
 beforeEach(() => {
+  vi.clearAllMocks();
+  useUpload().busy.value = false;
   useI18n().setLocale("en");
   useStudio().loaded.value = true;
   useStudio().categories.value = [makeCategory({ id: "general", name: "General" }), makeCategory({ id: "bells", name: "Bells" })];
@@ -66,4 +74,33 @@ it("hides retry for validation failures but keeps it for failed transfers", asyn
   await w.vm.$nextTick();
   expect(w.find('button[aria-label="Remove retry.wav"]').exists()).toBe(true);
   useStudio().state.value = null;
+});
+
+it.each(["pending", "uploading", "processing", "done", "error"] as const)("shows the upload bar only for active queue status %s", async (status) => {
+  const w = mountView();
+  useUpload().add([new File(["audio"], "bell.wav")]);
+  useUpload().items.value[0]!.status = status;
+  await w.vm.$nextTick();
+  const active = ["pending", "uploading", "processing"].includes(status);
+  expect(w.find('[data-test="upload-bar"]').exists()).toBe(active);
+  expect(!!(w.element as HTMLElement).style.paddingBottom).toBe(active);
+});
+it("keeps the upload bar visible while busy even with no queued rows", async () => {
+  const w = mountView();
+  useUpload().busy.value = true;
+  await w.vm.$nextTick();
+  expect(w.find('[data-test="upload-bar"]').exists()).toBe(true);
+});
+it.each([CATEGORY_DEFAULT, null, "soft"])("upload maps profile choice %s to the start body", async (profile) => {
+  const w = mountView();
+  useUpload().add([new File(["audio"], "bell.wav")]);
+  await w.vm.$nextTick();
+  const radioIndex = profile === CATEGORY_DEFAULT ? 0 : profile === null ? 1 : 2;
+  await w.findAll('input[type="radio"]')[radioIndex]!.setValue(true);
+  await w.get('[data-test="upload-bar"] button').trigger("click");
+  expect(useUpload().start).toHaveBeenCalledTimes(1);
+  const body = vi.mocked(useUpload().start).mock.calls[0]![0];
+  expect(body).toMatchObject({ category_id: "general", seasons: ["regular"], all_seasons: false, tags: [] });
+  if (profile === CATEGORY_DEFAULT) expect(body).not.toHaveProperty("profile_id");
+  else expect(body.profile_id).toBe(profile);
 });

@@ -1,7 +1,7 @@
 import { ref, watch, type Ref } from "vue";
-import { messageOf, ui } from "@/api/client";
-import type { UploadComplete } from "@/api/types";
-import { CATEGORY_DEFAULT } from "@/components/ProfilePicker.vue";
+import { ApiError, messageOf, ui } from "@/api/client";
+import type { Sound, UploadComplete } from "@/api/types";
+import { CATEGORY_DEFAULT } from "@/lib/profiles";
 import { translate } from "@/i18n";
 import { useStudio } from "./useStudio";
 import { useJobs } from "./useJobs";
@@ -41,20 +41,42 @@ function schedule(): void {
     schedule();
   }, 1500);
 }
+const confirming = new Set<UploadItem>();
+function applyStatus(item: UploadItem, sound: Sound): void {
+  if (sound.status === "ready") item.status = "done";
+  if (sound.status === "failed") {
+    item.status = "error";
+    item.error = sound.error ?? translate("error.unknown");
+    item.retryable = false;
+  }
+}
+async function confirmMissing(item: UploadItem): Promise<void> {
+  if (confirming.has(item)) return;
+  confirming.add(item);
+  const soundId = item.soundId!;
+  const stillProcessing = () => items.value.includes(item) && item.status === "processing" && item.soundId === soundId;
+  try {
+    const sound = await ui.sounds.get(soundId);
+    if (stillProcessing()) applyStatus(item, sound);
+  } catch (cause) {
+    if (stillProcessing() && cause instanceof ApiError && cause.status === 404) {
+      item.status = "error";
+      item.error = translate("upload.soundRemoved");
+      item.retryable = false;
+    }
+    // Transient failures leave the row processing for the next sound poll.
+  } finally {
+    confirming.delete(item);
+    schedule();
+  }
+}
 watch(studio.sounds, (sounds) => {
   const byId = new Map(sounds.map((sound) => [sound.id, sound]));
   for (const item of items.value) {
     if (item.status !== "processing" || !item.soundId) continue;
     const sound = byId.get(item.soundId);
-    if (!sound && studio.loaded.value) {
-      item.status = "error";
-      item.error = translate("upload.soundRemoved");
-    }
-    if (sound?.status === "ready") item.status = "done";
-    if (sound?.status === "failed") {
-      item.status = "error";
-      item.error = sound.error ?? translate("error.unknown");
-    }
+    if (sound) applyStatus(item, sound);
+    else void confirmMissing(item);
   }
   schedule();
 });
