@@ -58,5 +58,57 @@
         }
       }
     }
+  },
+  "services": {
+    "select": {
+      "name": "Select sound",
+      "description": "Select a sound from the locally cached catalog without repeating until the eligible sounds have been played. Returns audio details for use in automations.",
+      "fields": {
+        "category": {
+          "name": "Category",
+          "description": "Category ID or name to select from."
+        },
+        "tags": {
+          "name": "Tags",
+          "description": "Require all listed tags. Accepts a list or comma-separated text."
+        },
+        "season": {
+          "name": "Season",
+          "description": "Season ID or name for this selection. Omit to use the active season. Falls back to regular when no sounds match."
+        },
+        "dry_run": {
+          "name": "Dry run",
+          "description": "Preview a selection without changing history, firing an event, or reporting to Studio."
+        }
+      }
+    },
+    "reset_history": {
+      "name": "Reset history",
+      "description": "Clear shuffle bags and last selections for a category, or for all categories when omitted.",
+      "fields": {
+        "category": {
+          "name": "Category",
+          "description": "Optional category ID or name. Omit to reset all categories."
+        }
+      }
+    },
+    "refresh": {
+      "name": "Refresh catalog",
+      "description": "Request the latest catalog from Sound Effects Studio. Cached selection remains available while Studio is offline."
+    }
+  },
+  "exceptions": {
+    "unknown_category": {
+      "message": "The requested category does not exist."
+    },
+    "unknown_season": {
+      "message": "The requested season does not exist."
+    },
+    "no_eligible_sound": {
+      "message": "No eligible sound was found in category {category}."
+    },
+    "not_loaded": {
+      "message": "Sound Effects is not loaded. Set up the integration before using this action."
+    }
   }
 }

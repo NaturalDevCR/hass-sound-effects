@@ -99,3 +99,32 @@ def catalog_payload() -> dict[str, Any]:
             sound("off", "intro", ["regular"], enabled=False),
         ],
     }
+
+
+@pytest.fixture
+async def loaded_entry(hass, aioclient_mock, catalog_payload):
+    """Load a real runtime and always flush history/cancel its background work."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.sound_effects.const import DOMAIN
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={"host": "studio", "port": 8099, "token": "secret"},
+        unique_id="studio-id",
+        options={"public_base_url": "https://ha.example/", "scan_interval": 3600},
+    )
+    entry.add_to_hass(hass)
+    base = "http://studio:8099/api/v1"
+    aioclient_mock.get(
+        f"{base}/health",
+        json={"status": "ok", "version": "1.0", "api_version": 1, "instance_id": "studio-id"},
+    )
+    aioclient_mock.get(f"{base}/catalog", json=catalog_payload)
+    aioclient_mock.post(f"{base}/selections", status=204)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    yield entry
+    if hass.config_entries.async_get_entry(entry.entry_id) is not None:
+        assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()

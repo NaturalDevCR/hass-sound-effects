@@ -1,0 +1,7 @@
+{
+  "services": {
+    "select": {"service": "mdi:dice-multiple"},
+    "reset_history": {"service": "mdi:history"},
+    "refresh": {"service": "mdi:refresh"}
+  }
+}

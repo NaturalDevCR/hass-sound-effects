@@ -58,5 +58,57 @@
         }
       }
     }
+  },
+  "services": {
+    "select": {
+      "name": "Seleccionar sonido",
+      "description": "Selecciona un sonido del catálogo guardado localmente sin repetir hasta haber reproducido todos los sonidos disponibles. Devuelve los datos del audio para usarlos en automatizaciones.",
+      "fields": {
+        "category": {
+          "name": "Categoría",
+          "description": "ID o nombre de la categoría de la que se seleccionará el sonido."
+        },
+        "tags": {
+          "name": "Etiquetas",
+          "description": "Exige todas las etiquetas indicadas. Acepta una lista o texto separado por comas."
+        },
+        "season": {
+          "name": "Temporada",
+          "description": "ID o nombre de la temporada para esta selección. Si se omite, usa la temporada activa. Si no hay sonidos que coincidan, usa la temporada regular."
+        },
+        "dry_run": {
+          "name": "Simular selección",
+          "description": "Prueba una selección sin cambiar el historial, emitir un evento ni informar a Studio."
+        }
+      }
+    },
+    "reset_history": {
+      "name": "Restablecer historial",
+      "description": "Borra el historial de reproducción aleatoria y las últimas selecciones de una categoría, o de todas las categorías si se omite.",
+      "fields": {
+        "category": {
+          "name": "Categoría",
+          "description": "ID o nombre de la categoría (opcional). Si se omite, restablece todas las categorías."
+        }
+      }
+    },
+    "refresh": {
+      "name": "Actualizar catálogo",
+      "description": "Solicita el catálogo más reciente a Sound Effects Studio. La selección local sigue disponible aunque Studio esté desconectado."
+    }
+  },
+  "exceptions": {
+    "unknown_category": {
+      "message": "La categoría solicitada no existe."
+    },
+    "unknown_season": {
+      "message": "La temporada solicitada no existe."
+    },
+    "no_eligible_sound": {
+      "message": "No hay sonidos que cumplan los criterios en la categoría {category}."
+    },
+    "not_loaded": {
+      "message": "Sound Effects no está cargado. Configura la integración antes de usar esta acción."
+    }
   }
 }

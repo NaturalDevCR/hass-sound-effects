@@ -54,7 +54,7 @@ async def test_online_setup_and_unload(hass, entry, aioclient_mock, hass_storage
     assert state.connected
     assert state.last_sync is not None
     assert state.app_version == "1.2.3"
-    assert entry.runtime_data.manager is None
+    assert entry.runtime_data.manager is not None
     assert entry.runtime_data.coordinator.update_interval == timedelta(seconds=45)
     assert hass_storage[f"{DOMAIN}.{entry.entry_id}.catalog"]["data"] == {
         "etag": '"rev-7"',
@@ -292,4 +292,53 @@ async def test_credential_update_reloads_once(hass, entry, aioclient_mock, catal
         )
         await hass.async_block_till_done()
         reload.assert_awaited_once_with(entry.entry_id)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_auth_failed_entry_revived_by_discovery(hass, entry, aioclient_mock, catalog_payload):
+    from homeassistant.config_entries import SOURCE_HASSIO
+    from homeassistant.helpers.service_info.hassio import HassioServiceInfo
+
+    aioclient_mock.get(f"{BASE}/health", status=401)
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    await hass.async_block_till_done()
+    aioclient_mock.clear_requests()
+    online(aioclient_mock, catalog_payload)
+    info = HassioServiceInfo(
+        config={**entry.data, "token": "valid", "instance_id": "studio-id"},
+        name="Sound Effects Studio",
+        slug="sound_effects_studio",
+        uuid="1234",
+    )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=info
+    )
+    assert result["reason"] == "already_configured"
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.data["token"] == "valid"
+    assert aioclient_mock.mock_calls[0][3]["Authorization"] == "Bearer valid"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_discovery_unchanged_does_not_reload(hass, entry, aioclient_mock, catalog_payload):
+    from homeassistant.config_entries import SOURCE_HASSIO
+    from homeassistant.helpers.service_info.hassio import HassioServiceInfo
+
+    online(aioclient_mock, catalog_payload)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    info = HassioServiceInfo(
+        config={**entry.data, "instance_id": "studio-id"},
+        name="Sound Effects Studio",
+        slug="sound_effects_studio",
+        uuid="1234",
+    )
+    with patch.object(hass.config_entries, "async_reload", return_value=True) as reload:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_HASSIO}, data=info
+        )
+        await hass.async_block_till_done()
+        assert result["reason"] == "already_configured"
+        reload.assert_not_awaited()
     assert await hass.config_entries.async_unload(entry.entry_id)

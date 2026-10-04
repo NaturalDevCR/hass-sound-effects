@@ -124,7 +124,15 @@ class SoundEffectsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="invalid_discovery_info")
         await self.async_set_unique_id(config["instance_id"])
         data = {key: config[key] for key in (CONF_HOST, CONF_PORT, CONF_TOKEN)}
-        self._abort_if_unique_id_configured(updates=data)
+        if entry := self.hass.config_entries.async_entry_for_domain_unique_id(
+            DOMAIN, config["instance_id"]
+        ):
+            return self.async_update_reload_and_abort(
+                entry,
+                data_updates=data,
+                reason="already_configured",
+                reload_even_if_entry_is_unchanged=False,
+            )
         if self._async_current_entries(include_ignore=False):
             return self.async_abort(reason="single_instance_allowed")
         self._pending = data

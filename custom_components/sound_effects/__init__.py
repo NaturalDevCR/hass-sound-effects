@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -18,27 +17,19 @@ from homeassistant.helpers.typing import ConfigType
 from .api import StudioClient
 from .const import CONF_HOST, CONF_PORT, CONF_TOKEN, DOMAIN, EVENT_CATALOG_CHANGED, STORAGE_VERSION
 from .coordinator import SoundEffectsCoordinator
+from .manager import SoundEffectsManager
 from .services import async_register_services
-
-if TYPE_CHECKING:
-
-    class SoundEffectsManager(Protocol):
-        """Temporary manager type; Task 11 replaces this with its manager import."""
-
 
 PLATFORMS: list[Platform] = []
 # HA's schema factory leaves its dictionary parameters untyped.
-CONFIG_SCHEMA = cast(
-    Callable[[ConfigType], ConfigType],
-    cv.config_entry_only_config_schema(DOMAIN),  # pyright: ignore[reportUnknownMemberType]
-)
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
 
 
 @dataclass
 class SoundEffectsRuntime:
     client: StudioClient
     coordinator: SoundEffectsCoordinator
-    manager: SoundEffectsManager | None
+    manager: SoundEffectsManager
 
 
 type SoundEffectsConfigEntry = ConfigEntry[SoundEffectsRuntime]
@@ -66,7 +57,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: SoundEffectsConfigEntry)
         raise coordinator.last_exception
     if not coordinator.last_update_success and not had_snapshot:
         raise ConfigEntryNotReady("Studio is offline and no catalog snapshot is available")
-    entry.runtime_data = SoundEffectsRuntime(client, coordinator, manager=None)
+    manager = SoundEffectsManager(hass, entry, coordinator)
+    await manager.async_load()
+    entry.runtime_data = SoundEffectsRuntime(client, coordinator, manager)
     entry.async_on_unload(coordinator.async_add_listener(lambda: None))
     setup_options = entry.options
 
@@ -87,11 +80,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: SoundEffectsConfigEntry)
 
 async def async_unload_entry(hass: HomeAssistant, entry: SoundEffectsConfigEntry) -> bool:
     """Unload platforms; Home Assistant then runs the registered cleanup hooks."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded:
+        await entry.runtime_data.manager.async_flush()
+    return unloaded
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: SoundEffectsConfigEntry) -> None:
-    """Delete the persisted catalog when the Studio entry is removed."""
+    """Delete the persisted catalog and history when the Studio entry is removed."""
     await Store[dict[str, Any]](
         hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}.catalog"
+    ).async_remove()
+    await Store[dict[str, Any]](
+        hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}.history"
     ).async_remove()
