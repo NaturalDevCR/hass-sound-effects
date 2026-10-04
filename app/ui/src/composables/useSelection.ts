@@ -71,7 +71,7 @@ export function useSelection({ visible, activeCategory, returnFocusTo }: Options
     // hand focus back unless the user already put it somewhere else.
     void nextTick(() => {
       const active = document.activeElement;
-      if (!active || active === document.body || !active.isConnected) returnFocusTo.value?.focus();
+      if (!active || active === document.body || !active.isConnected) returnFocusTo.value?.focus({ preventScroll: true });
     });
   }
 

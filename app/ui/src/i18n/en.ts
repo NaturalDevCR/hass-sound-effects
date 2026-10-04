@@ -181,7 +181,7 @@ export const en = {
   "picker.tags.add": "Add tag",
   "picker.tags.remove": "Remove tag {tag}",
   "picker.tags.suggestions": "Existing tags",
-  "picker.tags.pending": "Will be added as “{tag}”",
+  "picker.tags.pending": "Will be saved as “{tag}”",
   "picker.profile.label": "Normalization profile",
   "picker.profile.none": "No normalization",
   "picker.profile.noneHint": "Keep the original loudness",

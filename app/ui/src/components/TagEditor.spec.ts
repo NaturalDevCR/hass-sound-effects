@@ -85,7 +85,7 @@ describe("TagEditor", () => {
       const wrapper = mountEditor();
       expect(wrapper.find('[data-test="pending"]').exists()).toBe(false);
       await type(wrapper, "Kids Room");
-      expect(wrapper.get('[data-test="pending"]').text()).toBe("Will be added as “kids_room”");
+      expect(wrapper.get('[data-test="pending"]').text()).toBe("Will be saved as “kids_room”");
       expect(wrapper.get("input").attributes("aria-describedby")).toBe(wrapper.get('[data-test="pending"]').attributes("id"));
     });
 

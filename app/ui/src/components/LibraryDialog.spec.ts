@@ -78,7 +78,7 @@ describe("LibraryDialog tags", () => {
   it("explains what a pending draft will become", async () => {
     const wrapper = mountDialog();
     await editors(wrapper)[0]!.setValue("Kids Room");
-    expect(wrapper.text()).toContain("Will be added as “kids_room”");
+    expect(wrapper.text()).toContain("Will be saved as “kids_room”");
   });
 
   it("starts clean every time it opens", async () => {

@@ -182,7 +182,7 @@ export const es: Record<keyof typeof en, string> = {
   "picker.tags.add": "Agregar etiqueta",
   "picker.tags.remove": "Quitar la etiqueta {tag}",
   "picker.tags.suggestions": "Etiquetas existentes",
-  "picker.tags.pending": "Se agregará como “{tag}”",
+  "picker.tags.pending": "Se guardará como “{tag}”",
   "picker.profile.label": "Perfil de normalización",
   "picker.profile.none": "Sin normalización",
   "picker.profile.noneHint": "Conserva el volumen original",

@@ -505,6 +505,17 @@ describe("selection", () => {
     expect(document.activeElement).toBe(wrapper.get('[data-test="select-toggle"]').element);
   });
 
+  it("returns focus without scrolling the list back to the top", async () => {
+    const { wrapper } = await mountLibrary();
+    await enterSelection(wrapper, "Bell");
+    const toggle = wrapper.get('[data-test="select-toggle"]').element as HTMLElement;
+    const focus = vi.spyOn(toggle, "focus");
+    (wrapper.get('[data-test="done"]').element as HTMLElement).focus();
+    await wrapper.get('[data-test="done"]').trigger("click");
+    await flushPromises();
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
   it("also does so after Escape and after a confirmed delete", async () => {
     const { wrapper } = await mountLibrary();
     await enterSelection(wrapper, "Bell");
