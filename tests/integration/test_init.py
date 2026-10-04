@@ -4,9 +4,10 @@ from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.sound_effects import SoundEffectsRuntime
 from custom_components.sound_effects.const import DOMAIN, EVENT_CATALOG_CHANGED, STORAGE_VERSION
@@ -87,7 +88,7 @@ async def test_offline_without_snapshot(hass, entry, aioclient_mock):
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_catalog_event(hass, entry, aioclient_mock, catalog_payload):
+async def test_catalog_event(hass, entry, aioclient_mock, hass_storage, catalog_payload):
     online(aioclient_mock, catalog_payload)
     assert await hass.config_entries.async_setup(entry.entry_id)
     changed = {**catalog_payload, "revision": 8}
@@ -99,6 +100,10 @@ async def test_catalog_event(hass, entry, aioclient_mock, catalog_payload):
     await hass.async_block_till_done()
     assert aioclient_mock.call_count == count + 2
     assert entry.runtime_data.coordinator.data.catalog.revision == 8
+    assert hass_storage[f"{DOMAIN}.{entry.entry_id}.catalog"]["data"] == {
+        "etag": '"rev-8"',
+        "catalog": changed,
+    }
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -111,10 +116,14 @@ async def test_304_keeps_catalog(hass, entry, aioclient_mock, catalog_payload):
     aioclient_mock.clear_requests()
     aioclient_mock.get(f"{BASE}/health", json=HEALTH)
     aioclient_mock.get(f"{BASE}/catalog", status=304)
-    await coordinator.async_refresh()
+    next_sync = last_sync + timedelta(seconds=10)
+    with patch(
+        "custom_components.sound_effects.coordinator.dt_util.utcnow", return_value=next_sync
+    ):
+        await coordinator.async_refresh()
     assert coordinator.data.catalog is original
     assert coordinator.data.connected
-    assert coordinator.data.last_sync >= last_sync
+    assert coordinator.data.last_sync == next_sync
     assert aioclient_mock.mock_calls[-1][3]["If-None-Match"] == '"rev-7"'
     assert await hass.config_entries.async_unload(entry.entry_id)
 
@@ -226,4 +235,61 @@ async def test_corrupt_snapshot_offline_retries(hass, entry, aioclient_mock, has
     aioclient_mock.get(f"{BASE}/health", exc=TimeoutError())
     assert not await hass.config_entries.async_setup(entry.entry_id)
     assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_refresh_starts_reauth(hass, entry, aioclient_mock, catalog_payload):
+    online(aioclient_mock, catalog_payload)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{BASE}/health", status=401)
+    await entry.runtime_data.coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert any(
+        flow["context"]["source"] == SOURCE_REAUTH and flow["context"]["entry_id"] == entry.entry_id
+        for flow in hass.config_entries.flow.async_progress()
+    )
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_remove_snapshot(hass, entry, aioclient_mock, hass_storage, catalog_payload):
+    online(aioclient_mock, catalog_payload)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    key = f"{DOMAIN}.{entry.entry_id}.catalog"
+    assert key in hass_storage
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert key not in hass_storage
+
+
+async def test_polling_without_entities(hass, entry, aioclient_mock, catalog_payload):
+    online(aioclient_mock, catalog_payload)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    count = aioclient_mock.call_count
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=46))
+    await hass.async_block_till_done()
+    assert aioclient_mock.call_count == count + 2
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    count = aioclient_mock.call_count
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=100))
+    await hass.async_block_till_done()
+    assert aioclient_mock.call_count == count
+
+
+@pytest.mark.parametrize("source", ["reauth", "reconfigure"])
+async def test_credential_update_reloads_once(hass, entry, aioclient_mock, catalog_payload, source):
+    online(aioclient_mock, catalog_payload)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": source, "entry_id": entry.entry_id},
+        data=dict(entry.data) if source == "reauth" else None,
+    )
+    with patch.object(hass.config_entries, "async_reload", return_value=True) as reload:
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**entry.data, "token": "rotated"}
+        )
+        await hass.async_block_till_done()
+        reload.assert_awaited_once_with(entry.entry_id)
     assert await hass.config_entries.async_unload(entry.entry_id)

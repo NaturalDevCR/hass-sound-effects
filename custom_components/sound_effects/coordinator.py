@@ -91,5 +91,3 @@ class SoundEffectsCoordinator(DataUpdateCoordinator[StudioState]):
                     previous.catalog, False, previous.last_sync, previous.app_version
                 )
             raise UpdateFailed("No catalog available from Studio") from err
-        except OSError as err:
-            raise UpdateFailed("Unable to save the Studio catalog snapshot") from err

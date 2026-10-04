@@ -52,26 +52,50 @@ class SoundEffectsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Validate the user-provided address and token."""
+        if self.source == config_entries.SOURCE_USER and self._async_current_entries(
+            include_ignore=False
+        ):
+            return self.async_abort(reason="single_instance_allowed")
+        return await self._async_connection_form("user", user_input)
+
+    async def _async_connection_form(
+        self, step_id: str, user_input: dict[str, Any] | None
+    ) -> ConfigFlowResult:
+        """Validate credentials and preserve the identity when updating an entry."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            health: dict[str, Any] | None = None
+            user_input = {
+                **user_input,
+                CONF_HOST: user_input[CONF_HOST].strip(),
+                CONF_TOKEN: user_input[CONF_TOKEN].strip(),
+            }
             try:
-                health = await self._health(user_input)
+                if not user_input[CONF_HOST]:
+                    errors[CONF_HOST] = "invalid_host"
+                else:
+                    health = await self._health(user_input)
             except StudioAuthError:
                 errors["base"] = "invalid_auth"
             except (StudioConnectionError, ValueError):
                 errors["base"] = "cannot_connect"
-            else:
+            if health is not None:
                 await self.async_set_unique_id(health["instance_id"])
-                if self.source == config_entries.SOURCE_REAUTH:
+                if self.source in (config_entries.SOURCE_REAUTH, config_entries.SOURCE_RECONFIGURE):
                     self._abort_if_unique_id_mismatch()
-                    return self.async_update_reload_and_abort(
-                        self._get_reauth_entry(), data_updates=user_input
+                    entry = (
+                        self._get_reauth_entry()
+                        if self.source == config_entries.SOURCE_REAUTH
+                        else self._get_reconfigure_entry()
                     )
+                    return self.async_update_reload_and_abort(entry, data_updates=user_input)
                 self._abort_if_unique_id_configured(updates=user_input)
+                if self._async_current_entries(include_ignore=False):
+                    return self.async_abort(reason="single_instance_allowed")
                 return self.async_create_entry(title="Sound Effects Studio", data=user_input)
         defaults = user_input or self._pending
         return self.async_show_form(
-            step_id="user",
+            step_id=step_id,
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_HOST, default=defaults.get(CONF_HOST, "")): str,
@@ -87,9 +111,22 @@ class SoundEffectsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_hassio(self, discovery_info: HassioServiceInfo) -> ConfigFlowResult:
         """Update an existing instance before showing discovery confirmation."""
         config = discovery_info.config
+        if (
+            not isinstance(config.get("instance_id"), str)
+            or not config["instance_id"].strip()
+            or not isinstance(config.get(CONF_HOST), str)
+            or not config[CONF_HOST].strip()
+            or not isinstance(config.get(CONF_TOKEN), str)
+            or not config[CONF_TOKEN].strip()
+            or type(config.get(CONF_PORT)) is not int
+            or not 1 <= config[CONF_PORT] <= 65535
+        ):
+            return self.async_abort(reason="invalid_discovery_info")
         await self.async_set_unique_id(config["instance_id"])
         data = {key: config[key] for key in (CONF_HOST, CONF_PORT, CONF_TOKEN)}
         self._abort_if_unique_id_configured(updates=data)
+        if self._async_current_entries(include_ignore=False):
+            return self.async_abort(reason="single_instance_allowed")
         self._pending = data
         self._addon_name = discovery_info.name
         return await self.async_step_hassio_confirm()
@@ -103,13 +140,15 @@ class SoundEffectsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 health = await self._health(self._pending)
             except StudioAuthError:
-                errors["base"] = "invalid_auth"
+                return self.async_abort(reason="invalid_auth")
             except (StudioConnectionError, ValueError):
                 errors["base"] = "cannot_connect"
             else:
                 if health["instance_id"] != self.unique_id:
                     return self.async_abort(reason="cannot_connect")
                 self._abort_if_unique_id_configured(updates=self._pending)
+                if self._async_current_entries(include_ignore=False):
+                    return self.async_abort(reason="single_instance_allowed")
                 return self.async_create_entry(title="Sound Effects Studio", data=self._pending)
         return self.async_show_form(
             step_id="hassio_confirm",
@@ -123,6 +162,13 @@ class SoundEffectsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._pending = dict(entry_data)
         return await self.async_step_user()
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Update the connection details for this Studio instance."""
+        self._pending = dict(self._get_reconfigure_entry().data)
+        return await self._async_connection_form("reconfigure", user_input)
+
 
 class SoundEffectsOptionsFlow(config_entries.OptionsFlow):
     """Configure public media URLs, an optional season entity, and polling."""
@@ -131,18 +177,19 @@ class SoundEffectsOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
         options = self.config_entry.options
-        season_option = vol.Optional(CONF_SEASON_ENTITY)
-        if options.get(CONF_SEASON_ENTITY):
-            season_option = vol.Optional(CONF_SEASON_ENTITY, default=options[CONF_SEASON_ENTITY])
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
                     vol.Optional(
-                        CONF_PUBLIC_BASE_URL, default=options.get(CONF_PUBLIC_BASE_URL, "")
+                        CONF_PUBLIC_BASE_URL,
+                        description={"suggested_value": options.get(CONF_PUBLIC_BASE_URL, "")},
                     ): str,
                     # HA's selector registry decorator erases the concrete class type.
-                    season_option: selector.EntitySelector(  # pyright: ignore[reportUnknownMemberType]
+                    vol.Optional(
+                        CONF_SEASON_ENTITY,
+                        description={"suggested_value": options.get(CONF_SEASON_ENTITY)},
+                    ): selector.EntitySelector(  # pyright: ignore[reportUnknownMemberType]
                         selector.EntitySelectorConfig(
                             domain=["sensor", "input_select", "select", "input_text"]
                         )

@@ -13,19 +13,32 @@
       "hassio_confirm": {
         "title": "Sound Effects Studio discovered",
         "description": "Connect to the {addon} app?"
+      },
+      "reconfigure": {
+        "title": "Reconfigure Sound Effects Studio",
+        "description": "Update the Studio host, port, and API token.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "token": "API token"
+        }
       }
     },
     "error": {
       "cannot_connect": "Unable to connect to Sound Effects Studio.",
-      "invalid_auth": "The API token was rejected."
+      "invalid_auth": "The API token was rejected.",
+      "invalid_host": "Enter a non-empty host."
     },
     "abort": {
       "already_configured": "This Studio instance is already configured.",
       "already_in_progress": "Configuration for this Studio instance is already in progress.",
       "cannot_connect": "Unable to verify the discovered Studio instance.",
-      "single_instance_allowed": "Only one Studio instance can be configured.",
+      "single_instance_allowed": "Only one Sound Effects Studio can be configured.",
       "reauth_successful": "The API token was updated.",
-      "unique_id_mismatch": "This address belongs to a different Studio instance."
+      "unique_id_mismatch": "This address belongs to a different Studio instance.",
+      "invalid_discovery_info": "The Studio discovery information is invalid.",
+      "invalid_auth": "The discovered API token was rejected.",
+      "reconfigure_successful": "The Studio connection was updated."
     }
   },
   "options": {

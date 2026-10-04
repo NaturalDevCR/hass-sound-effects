@@ -103,3 +103,10 @@ async def test_post_selections(client, aioclient_mock):
     await client.post_selections(events)
     assert aioclient_mock.mock_calls[0][2] == {"events": events}
     assert aioclient_mock.mock_calls[0][3]["Authorization"] == "Bearer secret"
+
+
+@pytest.mark.parametrize("endpoint", ["health", "catalog"])
+async def test_malformed_json(client, aioclient_mock, endpoint):
+    aioclient_mock.get(f"{BASE}/{endpoint}", text="{")
+    with pytest.raises(StudioConnectionError):
+        await getattr(client, endpoint)()
