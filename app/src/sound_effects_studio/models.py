@@ -281,6 +281,21 @@ class AuditionTarget(BaseModel):
     entity_id: str
     volume: float | None = None
 
+    @field_validator("id", "label")
+    @classmethod
+    def _require_nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("entity_id")
+    @classmethod
+    def _require_entity_id(cls, value: str) -> str:
+        domain, separator, object_id = value.partition(".")
+        if not domain or not separator or not object_id.strip():
+            raise ValueError("must be a domain.object_id entity id")
+        return value
+
 
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")

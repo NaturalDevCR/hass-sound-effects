@@ -74,12 +74,34 @@ def test_token_rotate_schedules_discovery(ingress: TestClient, app: FastAPI, mon
         calls.append(application)
 
     monkeypatch.setattr(api_ui_organize, "publish_discovery", publish)
+    app.state.supervisor = type("AvailableSupervisor", (), {"available": True})()
     old = app.state.tokens.get()
     response = ingress.post("/api/ui/token/rotate")
     assert response.status_code == 200
     assert app.state.tokens.get() != old
     assert response.json() == {"api_token_masked": app.state.tokens.masked()}
     assert calls == [app]
+
+
+def test_token_rotate_without_supervisor_does_not_schedule_discovery(
+    ingress: TestClient, app: FastAPI, monkeypatch
+):
+    from sound_effects_studio import api_ui_organize
+
+    calls: list[FastAPI] = []
+
+    async def publish(application: FastAPI) -> None:
+        calls.append(application)
+
+    monkeypatch.setattr(api_ui_organize, "publish_discovery", publish)
+    assert ingress.post("/api/ui/token/rotate").status_code == 200
+    assert calls == []
+
+
+def test_ui_router_rejects_non_ingress_peer(app: FastAPI):
+    denied = TestClient(app, client=("192.168.1.20", 50000)).get("/api/ui/token")
+    assert denied.status_code == 403
+    assert isinstance(denied.json()["detail"], str)
 
 
 async def test_discovery_publication_is_serialized(app: FastAPI):
@@ -138,11 +160,54 @@ def test_settings_validation_and_media_url_recompute(
             {"id": "x", "label": "X", "kind": "script", "entity_id": "script.x", "volume": None},
             {"id": "x", "label": "Y", "kind": "script", "entity_id": "script.y", "volume": None},
         ],
+        [
+            {
+                "id": "x",
+                "label": "X",
+                "kind": "media_player",
+                "entity_id": "media_player.",
+                "volume": None,
+            }
+        ],
+        [{"id": " ", "label": "X", "kind": "script", "entity_id": "script.x", "volume": None}],
+        [{"id": "x", "label": "  ", "kind": "script", "entity_id": "script.x", "volume": None}],
+        [{"id": "x", "label": "X", "kind": "script", "entity_id": "script.x", "volume": -0.1}],
     ):
-        assert (
-            ingress.put("/api/ui/settings", json={**base, "audition_targets": targets}).status_code
-            == 422
-        )
+        response = ingress.put("/api/ui/settings", json={**base, "audition_targets": targets})
+        assert response.status_code == 422
+        assert isinstance(response.json()["detail"], str)
+        assert ingress.get("/api/ui/settings").json() == base
+
+    valid = {
+        **base,
+        "audition_targets": [
+            {
+                "id": "living_room",
+                "label": "Living room",
+                "kind": "media_player",
+                "entity_id": "media_player.living_room",
+                "volume": 0.4,
+            },
+            {
+                "id": "announce",
+                "label": "Announce",
+                "kind": "script",
+                "entity_id": "script.announce",
+                "volume": None,
+            },
+        ],
+    }
+    assert ingress.put("/api/ui/settings", json=valid).json() == valid
+    assert ingress.get("/api/ui/settings").json() == valid
+
+    class AvailableSupervisor:
+        available = True
+
+    app.state.supervisor = AvailableSupervisor()
+    result = ingress.put("/api/ui/settings", json={**base, "media_base_url": "http://x/"})
+    assert result.status_code == 200
+    assert app.state.media_base_url_effective == "http://x"
+
     detected: list[tuple[object, str]] = []
 
     async def detect(supervisor, configured: str) -> str:
@@ -150,18 +215,10 @@ def test_settings_validation_and_media_url_recompute(
         return "http://auto.test"
 
     monkeypatch.setattr(api_ui_organize, "detect_media_base_url", detect)
-
-    class AvailableSupervisor:
-        available = True
-
-    app.state.supervisor = AvailableSupervisor()
-    result = ingress.put("/api/ui/settings", json={**base, "media_base_url": "https://ha.test/"})
-    assert result.status_code == 200
-    assert app.state.media_base_url_effective == "https://ha.test/"
-    result = ingress.put("/api/ui/settings", json={**base, "media_base_url": ""})
+    result = ingress.put("/api/ui/settings", json={**base, "media_base_url": "   "})
     assert result.status_code == 200
     assert app.state.media_base_url_effective == "http://auto.test"
-    assert detected == [(app.state.supervisor, "")]
+    assert detected == [(app.state.supervisor, "   ")]
 
 
 def test_category_crud_order_and_delete_conflict(ingress: TestClient, repo: Repository):
@@ -170,10 +227,10 @@ def test_category_crud_order_and_delete_conflict(ingress: TestClient, repo: Repo
     assert created.status_code == 200
     category = created.json()
     assert category["id"] == "door_sounds"
-    assert {item["id"] for item in ingress.get("/api/ui/categories").json()} >= {
+    assert [item["id"] for item in ingress.get("/api/ui/categories").json()] == [
         "general",
         "door_sounds",
-    }
+    ]
     assert (
         ingress.post("/api/ui/categories", json={"name": "Duplicate", "id": "general"}).status_code
         == 409
@@ -182,7 +239,11 @@ def test_category_crud_order_and_delete_conflict(ingress: TestClient, repo: Repo
     assert updated.json()["name"] == "Doors"
     assert updated.json()["id"] == "door_sounds"
     ordered = ingress.put("/api/ui/categories/order", json={"ids": ["door_sounds"]}).json()
-    assert [item["id"] for item in ordered][0] == "door_sounds"
+    assert [item["id"] for item in ordered] == ["door_sounds", "general"]
+    for ids in (["unknown"], ["door_sounds", "door_sounds"]):
+        invalid = ingress.put("/api/ui/categories/order", json={"ids": ids})
+        assert invalid.status_code == 422
+        assert isinstance(invalid.json()["detail"], str)
     repo.create_sound(
         category_id="door_sounds",
         title="Door",
@@ -210,7 +271,31 @@ def test_season_crud_resolve_and_regular_restrictions(ingress: TestClient, repo:
     )
     assert halloween.status_code == 200
     assert halloween.json()["id"] == "halloween"
-    assert "halloween" in {season["id"] for season in ingress.get("/api/ui/seasons").json()}
+    spring = ingress.post(
+        "/api/ui/seasons",
+        json={"name": "Spring", "start": "03-01", "end": "05-31", "priority": 7},
+    )
+    assert spring.status_code == 200
+    assert [season["id"] for season in ingress.get("/api/ui/seasons").json()] == [
+        "regular",
+        "spring",
+        "halloween",
+    ]
+    for invalid_date in ("13-40", "1-01"):
+        invalid_create = ingress.post(
+            "/api/ui/seasons",
+            json={"name": "Bad", "start": invalid_date, "end": "10-31"},
+        )
+        assert invalid_create.status_code == 422
+        invalid_patch = ingress.patch("/api/ui/seasons/halloween", json={"start": invalid_date})
+        assert invalid_patch.status_code == 422
+    assert (
+        ingress.post(
+            "/api/ui/seasons",
+            json={"id": "halloween", "name": "Duplicate", "start": "10-01", "end": "10-31"},
+        ).status_code
+        == 409
+    )
     assert ingress.patch("/api/ui/seasons/regular", json={"name": "All year"}).status_code == 200
     assert ingress.patch("/api/ui/seasons/regular", json={"priority": 5}).status_code == 422
     assert ingress.get("/api/ui/seasons/resolve?date=2026-10-15").json() == {
@@ -262,6 +347,7 @@ def test_profile_crud_patch_affected_apply_and_delete_conflicts(
     assert all(
         repo.get_sound(sound.id).recipe.profile_id == profile["id"] for sound in (one, second)
     )
+    assert repo.get_sound(one.id).recipe.gain_db == 2
     jobs = [job for job in app.state.jobs.list_jobs() if job.kind == "publish"]
     assert {job.sound_id for job in jobs} == {one.id, second.id}
     patched_again = ingress.patch(f"/api/ui/profiles/{profile['id']}", json={"lra": 9}).json()
@@ -293,6 +379,48 @@ def test_apply_by_sound_ids_and_profile_delete(ingress: TestClient, repo: Reposi
     ).json() == {"queued": 1}
     assert ingress.delete(f"/api/ui/profiles/{profile['id']}").status_code == 409
     assert ingress.delete("/api/ui/profiles/voice").status_code == 204
+
+
+def test_apply_is_atomic_and_deduplicates_targets(
+    ingress: TestClient, repo: Repository, app: FastAPI
+):
+    sound = make_sound(repo)
+    profile = ingress.post(
+        "/api/ui/profiles",
+        json={"name": "Atomic", "target_lufs": -16, "true_peak": -1.5, "lra": 11},
+    ).json()
+    before_jobs = len([job for job in app.state.jobs.list_jobs() if job.kind == "publish"])
+    response = ingress.post(
+        f"/api/ui/profiles/{profile['id']}/apply",
+        json={"sound_ids": [sound.id, "missing"]},
+    )
+    assert response.status_code == 404
+    assert repo.get_sound(sound.id).recipe.profile_id is None
+    assert len([job for job in app.state.jobs.list_jobs() if job.kind == "publish"]) == before_jobs
+
+    duplicate = ingress.post(
+        f"/api/ui/profiles/{profile['id']}/apply",
+        json={"sound_ids": [sound.id, sound.id]},
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.json() == {"queued": 1}
+    assert (
+        len([job for job in app.state.jobs.list_jobs() if job.kind == "publish"]) == before_jobs + 1
+    )
+    assert (
+        ingress.post("/api/ui/profiles/missing/apply", json={"sound_ids": [sound.id]}).status_code
+        == 404
+    )
+    assert (
+        ingress.post(
+            f"/api/ui/profiles/{profile['id']}/apply", json={"category_id": "missing"}
+        ).status_code
+        == 404
+    )
+    assert repo.get_sound(sound.id).recipe.profile_id == profile["id"]
+    assert (
+        len([job for job in app.state.jobs.list_jobs() if job.kind == "publish"]) == before_jobs + 1
+    )
 
 
 def test_profile_delete_conflicts_with_category_default(ingress: TestClient, repo: Repository):

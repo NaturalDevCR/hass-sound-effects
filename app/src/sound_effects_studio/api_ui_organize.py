@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date as date_type
 from typing import cast
 
@@ -10,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from starlette.responses import Response
 
 from . import __version__
-from .errors import InvalidError
+from .errors import InvalidError, NotFoundError
 from .lifecycle import detect_media_base_url, publish_discovery
 from .models import (
     Category,
@@ -25,6 +26,7 @@ from .models import (
     Settings,
     slugify,
 )
+from .repository import Repository
 from .seasons import resolve_calendar_season
 
 router = APIRouter(prefix="/api/ui")
@@ -43,7 +45,7 @@ class ProfileApply(BaseModel):
     category_id: str | None = None
 
 
-def _repo(request: Request):
+def _repo(request: Request) -> Repository:
     return request.app.state.repo
 
 
@@ -62,7 +64,7 @@ async def get_state(request: Request) -> dict[str, object]:
             "created_by_app": www.created_by_app,
         },
         "media_base_url_effective": state.media_base_url_effective,
-        "storage": state.publisher.storage_usage(),
+        "storage": await asyncio.to_thread(state.publisher.storage_usage),
         "settings": state.repo.get_settings(),
     }
 
@@ -75,7 +77,8 @@ async def get_token(request: Request) -> dict[str, str]:
 @router.post("/token/rotate")
 async def rotate_token(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
     request.app.state.tokens.rotate()
-    background_tasks.add_task(publish_discovery, request.app)
+    if request.app.state.supervisor.available:
+        background_tasks.add_task(publish_discovery, request.app)
     return {"api_token_masked": request.app.state.tokens.masked()}
 
 
@@ -92,23 +95,19 @@ async def put_settings(data: Settings, request: Request) -> Settings:
             raise InvalidError(f"Audition target id '{target.id}' is duplicated.")
         seen.add(target.id)
         domain = "media_player" if target.kind == "media_player" else "script"
-        if not target.entity_id.startswith(f"{domain}."):
+        entity_domain, separator, object_id = target.entity_id.partition(".")
+        if entity_domain != domain or not separator or not object_id.strip():
             raise InvalidError(
                 f"Audition target '{target.id}' must use an entity_id in the {domain} domain."
             )
         if target.volume is not None and not 0 <= target.volume <= 1:
             raise InvalidError("Audition target volume must be between 0 and 1.")
     repo = _repo(request)
-    previous = repo.get_settings()
     saved = repo.update_settings(data)
-    if saved.media_base_url != previous.media_base_url:
-        supervisor = request.app.state.supervisor
-        if saved.media_base_url:
-            request.app.state.media_base_url_effective = saved.media_base_url
-        elif supervisor.available:
-            request.app.state.media_base_url_effective = await detect_media_base_url(supervisor, "")
-        else:
-            request.app.state.media_base_url_effective = ""
+    supervisor = request.app.state.supervisor
+    request.app.state.media_base_url_effective = await detect_media_base_url(
+        supervisor, saved.media_base_url
+    )
     return saved
 
 
@@ -138,7 +137,10 @@ async def delete_category(category_id: str, request: Request) -> Response:
 
 @router.put("/categories/order", response_model=list[Category])
 async def reorder_categories(data: CategoryOrder, request: Request) -> list[Category]:
-    return _repo(request).reorder_categories(data.ids)
+    try:
+        return _repo(request).reorder_categories(data.ids)
+    except NotFoundError as exc:
+        raise InvalidError(str(exc)) from exc
 
 
 @router.get("/seasons", response_model=list[Season])
@@ -157,9 +159,6 @@ async def create_season(data: SeasonCreate, request: Request) -> Season:
 @router.patch("/seasons/{season_id}", response_model=Season)
 async def patch_season(season_id: str, data: SeasonUpdate, request: Request) -> Season:
     repo = _repo(request)
-    season = repo.get_season(season_id)
-    if season.builtin and data.model_fields_set - {"name", "color", "icon"}:
-        raise InvalidError("The regular season only allows changing its name, color and icon.")
     return repo.update_season(season_id, data)
 
 
@@ -224,8 +223,10 @@ async def apply_profile(profile_id: str, data: ProfileApply, request: Request) -
         ]
     else:
         sound_ids = cast("list[str]", data.sound_ids)
-    for sound_id in sound_ids:
-        sound = repo.get_sound(sound_id)
+    sound_ids = list(dict.fromkeys(sound_ids))
+    sounds = [repo.get_sound(sound_id) for sound_id in sound_ids]
+    for sound in sounds:
+        sound_id = sound.id
         recipe = sound.recipe.model_copy(update={"profile_id": profile.id})
         repo.set_recipe(sound_id, recipe)
         request.app.state.jobs.enqueue_publish(sound_id)
