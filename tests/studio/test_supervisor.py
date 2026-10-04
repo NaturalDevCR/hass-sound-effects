@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 import httpx
 import pytest
-from sound_effects_studio.supervisor import SupervisorClient, SupervisorError
+from sound_effects_studio.supervisor import SupervisorClient, SupervisorError, describe_error
 
 pytestmark = pytest.mark.studio
 
@@ -152,6 +152,21 @@ async def test_transport_errors_become_supervisor_errors():
     with pytest.raises(SupervisorError, match="refused"):
         await client.self_info()
     await client.aclose()
+
+
+async def test_transport_errors_without_a_message_name_their_type():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("", request=request)
+
+    client = make_client(handler)
+    with pytest.raises(SupervisorError, match="ReadTimeout"):
+        await client.self_info()
+    await client.aclose()
+
+
+def test_describe_error_falls_back_to_the_exception_type():
+    assert describe_error(ValueError("boom")) == "boom"
+    assert describe_error(TimeoutError()) == "TimeoutError"
 
 
 @pytest.mark.parametrize(

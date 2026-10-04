@@ -15,6 +15,11 @@ class SupervisorError(Exception):
     """The Supervisor (or Core through it) could not be reached or refused the request."""
 
 
+def describe_error(exc: BaseException) -> str:
+    """A readable one-liner for an exception; some (timeouts) have an empty ``str``."""
+    return str(exc) or type(exc).__name__
+
+
 class SupervisorClient:
     """Talks to ``http://supervisor`` with the App's ``SUPERVISOR_TOKEN``.
 
@@ -86,7 +91,7 @@ class SupervisorClient:
                 json=body,
             )
         except httpx.HTTPError as exc:
-            raise SupervisorError(f"{method} {path} failed: {exc}") from exc
+            raise SupervisorError(f"{method} {path} failed: {describe_error(exc)}") from exc
         if response.is_error:
             raise SupervisorError(
                 f"{method} {path} returned {response.status_code}{_reason(response)}"

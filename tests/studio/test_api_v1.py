@@ -1,14 +1,15 @@
 """Integration API v1, error mapping and the UI shell served by the app factory."""
 
 import dataclasses
-import importlib.machinery
-import importlib.util
+import logging
 import re
 import sys
 import types
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
+import sound_effects_studio.app as app_module
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 from sound_effects_studio import __version__
@@ -93,6 +94,25 @@ def test_v1_requires_a_bearer_token(client: TestClient, method: str, path: str):
         method, path, json={"events": []}, headers={"Authorization": "Bearer wrong"}
     )
     assert wrong.status_code == 401
+
+
+def test_auth_runs_before_the_body_is_parsed(client: TestClient, auth: dict[str, str]):
+    json_type = {"Content-Type": "application/json"}
+    for body in ("{nope", '{"events": 5}', ""):
+        missing = client.post("/api/v1/selections", content=body, headers=json_type)
+        assert missing.status_code == 401, body
+        wrong = client.post(
+            "/api/v1/selections",
+            content=body,
+            headers={**json_type, "Authorization": "Bearer wrong"},
+        )
+        assert wrong.status_code == 401, body
+    assert (
+        client.post(
+            "/api/v1/selections", content="{nope", headers={**json_type, **auth}
+        ).status_code
+        == 422
+    )
 
 
 def test_v1_is_reachable_from_any_peer_with_the_token(client: TestClient, auth: dict[str, str]):
@@ -327,6 +347,22 @@ def test_ui_root_requires_the_ingress_peer(client: TestClient):
     assert isinstance(response.json()["detail"], str)
 
 
+@pytest.mark.parametrize(
+    "spoof",
+    [
+        {"X-Forwarded-For": INGRESS_PEER},
+        {"X-Real-IP": INGRESS_PEER},
+        {"Forwarded": f"for={INGRESS_PEER}"},
+        {"X-Forwarded-For": f"{INGRESS_PEER}, 10.0.0.9"},
+    ],
+)
+def test_forwarded_headers_cannot_pose_as_the_ingress_peer(
+    client: TestClient, spoof: dict[str, str]
+):
+    assert client.get("/", headers=spoof).status_code == 403
+    assert client.get("/assets/app.js", headers=spoof).status_code == 403
+
+
 def test_ui_root_without_a_build_is_503_text(ingress: TestClient):
     response = ingress.get("/")
     assert response.status_code == 503
@@ -359,11 +395,36 @@ def test_ui_assets_are_served_behind_ingress(client: TestClient, ingress: TestCl
     assert ingress.get("/assets/").status_code == 404
 
 
-def test_ui_assets_cannot_escape_the_assets_directory(ingress: TestClient, paths: Paths):
+def test_ui_assets_cannot_escape_the_assets_directory(
+    ingress: TestClient, paths: Paths, tmp_path: Path
+):
     build_ui(paths)
-    for path in ("/assets/../secret.txt", "/assets/%2e%2e/secret.txt", "/assets/..%2fsecret.txt"):
-        assert ingress.get(path).status_code in (400, 404), path
-        assert "outside assets" not in ingress.get(path).text
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret outside the build", encoding="utf-8")
+    (paths.static_dir / "assets" / "link.txt").symlink_to(outside)
+    (paths.static_dir / "assets" / "linkdir").symlink_to(tmp_path, target_is_directory=True)
+    attempts = (
+        "/assets/../secret.txt",
+        "/assets/%2e%2e/secret.txt",
+        "/assets/..%2fsecret.txt",
+        f"/assets/{outside}",  # absolute path after the prefix
+        f"/assets//{outside}",
+        "/assets/link.txt",
+        "/assets/linkdir/outside.txt",
+        "/assets/%00",
+    )
+    for path in attempts:
+        response = ingress.get(path)
+        assert response.status_code in (400, 404), path
+        assert "secret" not in response.text, path
+
+
+def test_ui_assets_follow_symlinks_that_stay_inside_the_assets_directory(
+    ingress: TestClient, paths: Paths
+):
+    build_ui(paths)
+    (paths.static_dir / "assets" / "alias.js").symlink_to(paths.static_dir / "assets" / "app.js")
+    assert ingress.get("/assets/alias.js").text == "console.log(1)"
 
 
 def test_dev_mode_opens_the_ui_to_any_peer(paths: Paths):
@@ -422,17 +483,17 @@ def fake_router_module(monkeypatch: pytest.MonkeyPatch, name: str, path: str) ->
         return {"from": name}
 
     module = types.ModuleType(f"sound_effects_studio.{name}")
-    module.__spec__ = importlib.machinery.ModuleSpec(module.__name__, None)
     module.__dict__["router"] = router
     monkeypatch.setitem(sys.modules, module.__name__, module)
 
 
 def test_optional_ui_routers_are_included_behind_ingress(
-    paths: Paths, monkeypatch: pytest.MonkeyPatch
+    paths: Paths, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
     fake_router_module(monkeypatch, "api_ui_organize", "/api/ui/organize-probe")
     fake_router_module(monkeypatch, "api_ui_sounds", "/api/ui/sounds-probe")
-    app = create_app(paths, start_background=False)
+    with caplog.at_level(logging.DEBUG, logger="sound_effects_studio.app"):
+        app = create_app(paths, start_background=False)
     try:
         ingress = TestClient(app, client=(INGRESS_PEER, 50000))
         assert ingress.get("/api/ui/organize-probe").json() == {"from": "api_ui_organize"}
@@ -440,17 +501,25 @@ def test_optional_ui_routers_are_included_behind_ingress(
         assert TestClient(app).get("/api/ui/organize-probe").status_code == 403
     finally:
         app.state.db.close()
+    assert "UI routers included: api_ui_organize, api_ui_sounds" in caplog.text
 
 
 def test_optional_ui_routers_are_skipped_when_the_module_is_absent(
-    paths: Paths, monkeypatch: pytest.MonkeyPatch
+    paths: Paths, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
-    fake_router_module(monkeypatch, "api_ui_organize", "/api/ui/organize-probe")
-    with monkeypatch.context() as patch:
-        patch.setattr(importlib.util, "find_spec", lambda name, package=None: None)
+    # A None entry makes the import fail exactly as a missing module would.
+    monkeypatch.setitem(sys.modules, "sound_effects_studio.api_ui_organize", None)
+    monkeypatch.setitem(sys.modules, "sound_effects_studio.api_ui_sounds", None)
+    with caplog.at_level(logging.DEBUG, logger="sound_effects_studio.app"):
         app = create_app(paths, start_background=False)
-    try:
-        ingress = TestClient(app, client=(INGRESS_PEER, 50000))
-        assert ingress.get("/api/ui/organize-probe").status_code == 404
-    finally:
-        app.state.db.close()
+    app.state.db.close()
+    assert "UI routers included: none" in caplog.text
+
+
+def test_a_broken_ui_router_module_is_not_hidden(paths: Paths, monkeypatch: pytest.MonkeyPatch):
+    def broken(name: str) -> types.ModuleType:
+        raise ModuleNotFoundError("No module named 'numpy'", name="numpy")
+
+    monkeypatch.setattr(app_module.importlib, "import_module", broken)
+    with pytest.raises(ModuleNotFoundError, match="numpy"):
+        create_app(paths, start_background=False)

@@ -25,7 +25,8 @@ def document() -> dict[str, Any]:
 
 def validator(document: dict[str, Any], schema: str) -> Draft202012Validator:
     return Draft202012Validator(
-        {"$ref": f"#/components/schemas/{schema}", "components": document["components"]}
+        {"$ref": f"#/components/schemas/{schema}", "components": document["components"]},
+        format_checker=Draft202012Validator.FORMAT_CHECKER,
     )
 
 

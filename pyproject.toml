@@ -24,6 +24,8 @@ dev = [
     "pyright>=1.1.390",
     "openapi-spec-validator>=0.7.2",
     "pyyaml>=6.0",
+    "httpx2>=2.13.1",
+    "jsonschema>=4.26.0",
 ]
 studio = ["fastapi>=0.115", "uvicorn[standard]>=0.32", "httpx>=0.28"]
 

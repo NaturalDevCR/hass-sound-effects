@@ -3,20 +3,11 @@
 from __future__ import annotations
 
 import subprocess
-import warnings
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from sound_effects_studio.config import Paths
-from starlette.exceptions import StarletteDeprecationWarning
-
-# Starlette 1.x prefers httpx2 for its TestClient and warns once, at first import, when only
-# httpx is installed. Import it here with that notice silenced so the API tests run warning-free
-# until httpx2 joins the dev dependency group.
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore", StarletteDeprecationWarning)
-    import starlette.testclient  # noqa: F401
 
 
 @pytest.fixture

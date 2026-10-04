@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import cast
 
 from fastapi import APIRouter, Depends, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from . import __version__
 from .auth import require_bearer
@@ -37,7 +39,13 @@ async def catalog(request: Request) -> Response:
 
 
 @router.post("/selections", status_code=204)
-async def selections(batch: SelectionBatch, request: Request) -> Response:
+async def selections(request: Request) -> Response:
+    # The body is parsed here rather than declared as a parameter: FastAPI parses declared bodies
+    # before it runs dependencies, which would answer malformed JSON with 422 ahead of the 401.
+    try:
+        batch = SelectionBatch.model_validate_json(await request.body())
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors(include_url=False, include_input=False)) from exc
     repo: Repository = request.app.state.repo
     repo.record_selections(batch.events)
     return Response(status_code=204)

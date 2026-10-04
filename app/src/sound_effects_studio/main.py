@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 
@@ -27,6 +28,18 @@ def resolve_log_level(options: dict[str, object]) -> str:
     return level if level in _LEVELS else "info"
 
 
+def uvicorn_options(log_level: str) -> dict[str, Any]:
+    """Server settings. Forwarded headers are ignored: ``require_ingress`` trusts only the peer
+    address, so a client must not be able to rewrite it with ``X-Forwarded-For``."""
+    return {
+        "host": "0.0.0.0",
+        "port": APP_PORT,
+        "log_level": log_level,
+        "proxy_headers": False,
+        "forwarded_allow_ips": "",
+    }
+
+
 def main() -> None:
     log_level = resolve_log_level(load_options(OPTIONS_PATH))
     logging.basicConfig(
@@ -37,7 +50,7 @@ def main() -> None:
     app = create_app(
         Paths.from_env(), supervisor=SupervisorClient(os.environ.get("SUPERVISOR_TOKEN"))
     )
-    uvicorn.run(app, host="0.0.0.0", port=APP_PORT, log_level=log_level)
+    uvicorn.run(app, **uvicorn_options(log_level))
 
 
 if __name__ == "__main__":

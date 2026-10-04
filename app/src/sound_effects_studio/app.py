@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-import importlib.util
+import logging
 import uuid
-from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Sequence
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager, suppress
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,13 @@ from .publisher import Publisher
 from .repository import Repository
 from .supervisor import SupervisorClient
 
+_LOGGER = logging.getLogger(__name__)
+
+# The Ingress UI routers, added by Tasks 6 and 7. Each module exposes a module-level ``router``.
+# They are imported by name and skipped while the module does not exist yet; once both exist this
+# list is replaced by plain imports.
 _UI_ROUTER_MODULES = ("api_ui_organize", "api_ui_sounds")
+_NO_SUPERVISOR = "The Supervisor API is not available"
 _VALIDATION_LOCATIONS = {"body", "query", "path", "header", "cookie"}
 
 type _ErrorHandler = Callable[[Request, Exception], Awaitable[Response]]
@@ -70,16 +77,18 @@ def create_app(
         state.notifier = None
         state.instance_id = _load_instance_id(paths.data_dir / "instance_id")
         state.www_status = publisher.ensure_dirs()
-        state.discovery_status = {"status": "unavailable", "message": None}
+        state.discovery_status = {
+            "status": "unavailable",
+            "message": None if state.supervisor.available else _NO_SUPERVISOR,
+        }
         state.media_base_url_effective = ""
+        _install_error_handlers(app)
+        app.include_router(api_v1.router)
+        _include_optional_routers(app)
+        _install_ui_shell(app)
     except BaseException:
         db.close()
         raise
-
-    _install_error_handlers(app)
-    app.include_router(api_v1.router)
-    _include_optional_routers(app)
-    _install_ui_shell(app)
     return app
 
 
@@ -109,51 +118,71 @@ def _make_lifespan(
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        try:
+        # Callbacks run last-in first-out; each is guarded, so one failure cannot skip the rest.
+        async with AsyncExitStack() as stack:
+            stack.callback(_close_database, app)
             if start_background:
-                async with _background_services(app):
-                    yield
-            else:
-                yield
-        finally:
-            app.state.db.close()
+                await _start_background_services(app, stack)
+            yield
 
     return lifespan
 
 
-@asynccontextmanager
-async def _background_services(app: FastAPI) -> AsyncGenerator[None]:
+async def _start_background_services(app: FastAPI, stack: AsyncExitStack) -> None:
+    """Start the render worker, notifier and Supervisor tasks; registers their shutdown.
+
+    Shutdown order: Supervisor tasks, render worker, notifier, Supervisor client, database.
+    """
     state = app.state
     supervisor: SupervisorClient = state.supervisor
-    await state.jobs.start()
+    _on_exit(stack, "close the Supervisor client", supervisor.aclose)
+
     notifier = CatalogNotifier(
         lifecycle.catalog_sender(supervisor), delay=lifecycle.CATALOG_NOTIFY_DELAY
     )
     state.notifier = notifier
-    cleanup = asyncio.create_task(
-        lifecycle.housekeeping(app, lifecycle.HOUSEKEEPING_INTERVAL), name="sound-effects-cleanup"
-    )
-    try:
-        if supervisor.available:
-            await lifecycle.publish_discovery(app)
-            state.media_base_url_effective = await lifecycle.detect_media_base_url(
-                supervisor, state.repo.get_settings().media_base_url
-            )
-            state.www_status.served = await lifecycle.check_www_served(state.paths.publish_dir)
-        else:
-            state.discovery_status = {
-                "status": "unavailable",
-                "message": "The Supervisor API is not available",
-            }
-        yield
-    finally:
-        cleanup.cancel()
-        with suppress(asyncio.CancelledError):
-            await cleanup
-        await state.jobs.stop()
-        await notifier.close()
+
+    async def close_notifier() -> None:
         state.notifier = None
-        await supervisor.aclose()
+        await notifier.close()
+
+    _on_exit(stack, "close the catalog notifier", close_notifier)
+
+    _on_exit(stack, "stop the render worker", state.jobs.stop)
+    await state.jobs.start()
+
+    # The Supervisor steps must neither delay startup nor announce an unbound port, so they run
+    # beside the server instead of inside the lifespan.
+    _run_task(stack, "supervisor-startup", lifecycle.supervisor_startup(app))
+    _run_task(stack, "housekeeping", lifecycle.housekeeping(app, lifecycle.HOUSEKEEPING_INTERVAL))
+
+
+def _run_task(stack: AsyncExitStack, name: str, work: Coroutine[Any, Any, None]) -> None:
+    task = asyncio.create_task(work, name=f"sound-effects-{name}")
+    _on_exit(stack, f"stop the {name} task", partial(_cancel, task))
+
+
+async def _cancel(task: asyncio.Task[None]) -> None:
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+
+
+def _on_exit(stack: AsyncExitStack, what: str, callback: Callable[[], Awaitable[None]]) -> None:
+    async def guarded() -> None:
+        try:
+            await callback()
+        except Exception:
+            _LOGGER.exception("Could not %s", what)
+
+    stack.push_async_callback(guarded)
+
+
+def _close_database(app: FastAPI) -> None:
+    try:
+        app.state.db.close()
+    except Exception:
+        _LOGGER.exception("Could not close the database")
 
 
 # --- errors --------------------------------------------------------------------------------
@@ -200,12 +229,18 @@ def _message(message: str) -> str:
 def _include_optional_routers(app: FastAPI) -> None:
     """Add the Ingress UI routers that exist; each is guarded by ``require_ingress``."""
     package = __package__ or "sound_effects_studio"
+    included: list[str] = []
     for name in _UI_ROUTER_MODULES:
         qualified = f"{package}.{name}"
-        if importlib.util.find_spec(qualified) is None:
+        try:
+            module = importlib.import_module(qualified)
+        except ModuleNotFoundError as exc:
+            if exc.name != qualified:
+                raise  # the router exists but one of its own imports is broken
             continue
-        module = importlib.import_module(qualified)
         app.include_router(module.router, dependencies=[Depends(require_ingress)])
+        included.append(name)
+    _LOGGER.debug("UI routers included: %s", ", ".join(included) or "none")
 
 
 def _install_ui_shell(app: FastAPI) -> None:
