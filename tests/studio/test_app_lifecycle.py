@@ -203,12 +203,22 @@ def test_a_discovery_that_cannot_be_deleted_is_retried_on_the_next_start(
 
 def test_a_discovery_the_supervisor_no_longer_knows_is_forgotten(paths: Paths, made: list[FastAPI]):
     (paths.data_dir / "discovery_uuid").write_text("uuid-old", encoding="utf-8")
-    gone = httpx.Response(400, json={"result": "error", "message": "Discovery message not found"})
+    gone = httpx.Response(404, json={"result": "error", "message": "Gone"})
     fake = FakeSupervisor(routes={("DELETE", "/discovery/uuid-old"): gone})
     app = build(made, paths, fake.client())
     with TestClient(app):
         assert wait_for(lambda: discovery_status(app) == "ok")
     assert remembered_uuids(paths) == ["uuid-new"]
+
+
+def test_a_not_found_message_with_another_status_remains_pending(paths: Paths, made: list[FastAPI]):
+    (paths.data_dir / "discovery_uuid").write_text("uuid-old", encoding="utf-8")
+    refused = httpx.Response(400, json={"message": "Discovery not found"})
+    fake = FakeSupervisor(routes={("DELETE", "/discovery/uuid-old"): refused})
+    app = build(made, paths, fake.client())
+    with TestClient(app):
+        assert wait_for(lambda: discovery_status(app) == "ok")
+    assert remembered_uuids(paths) == ["uuid-old", "uuid-new"]
 
 
 async def test_failed_deletes_remain_pending_when_publishing_also_fails(

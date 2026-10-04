@@ -67,6 +67,7 @@ def create_app(
         # the lifespan runs, so look it up per call instead of capturing it.
         repo = Repository(db, on_catalog_change=lambda revision: _catalog_changed(app, revision))
         state = app.state
+        state.discovery_lock = asyncio.Lock()
         state.paths = paths
         state.db = db
         state.repo = repo

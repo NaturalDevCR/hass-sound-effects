@@ -139,28 +139,29 @@ async def publish_discovery(app: FastAPI) -> None:
     The outcome lands in ``app.state.discovery_status``; this never raises.
     """
     state = app.state
-    supervisor: SupervisorClient = state.supervisor
-    uuid_file: Path = state.paths.data_dir / "discovery_uuid"
-    try:
-        hostname = (await supervisor.self_info()).get("hostname")
-        if not isinstance(hostname, str) or not hostname:
-            raise SupervisorError("The Supervisor did not report the App hostname")
-        stale = await _delete_previous_discoveries(supervisor, uuid_file)
-        uuid = await supervisor.publish_discovery(
-            {
-                "host": hostname,
-                "port": APP_PORT,
-                "token": state.tokens.get(),
-                "instance_id": state.instance_id,
-            }
-        )
-    except Exception as exc:
-        message = describe_error(exc)
-        _LOGGER.warning("Could not publish discovery: %s", message)
-        state.discovery_status = {"status": "failed", "message": message}
-        return
-    state.discovery_status = {"status": "ok", "message": None}
-    _remember_discoveries(uuid_file, [*stale, uuid])
+    async with state.discovery_lock:
+        supervisor: SupervisorClient = state.supervisor
+        uuid_file: Path = state.paths.data_dir / "discovery_uuid"
+        try:
+            hostname = (await supervisor.self_info()).get("hostname")
+            if not isinstance(hostname, str) or not hostname:
+                raise SupervisorError("The Supervisor did not report the App hostname")
+            stale = await _delete_previous_discoveries(supervisor, uuid_file)
+            uuid = await supervisor.publish_discovery(
+                {
+                    "host": hostname,
+                    "port": APP_PORT,
+                    "token": state.tokens.get(),
+                    "instance_id": state.instance_id,
+                }
+            )
+        except Exception as exc:
+            message = describe_error(exc)
+            _LOGGER.warning("Could not publish discovery: %s", message)
+            state.discovery_status = {"status": "failed", "message": message}
+            return
+        state.discovery_status = {"status": "ok", "message": None}
+        _remember_discoveries(uuid_file, [*stale, uuid])
 
 
 async def _delete_previous_discoveries(supervisor: SupervisorClient, uuid_file: Path) -> list[str]:
@@ -170,7 +171,7 @@ async def _delete_previous_discoveries(supervisor: SupervisorClient, uuid_file: 
         try:
             await supervisor.delete_discovery(uuid)
         except SupervisorError as exc:
-            if "not found" in str(exc).lower():
+            if exc.status == 404:
                 continue
             _LOGGER.debug("Previous discovery %s was not removed: %s", uuid, exc)
             stale.append(uuid)

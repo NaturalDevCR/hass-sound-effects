@@ -14,6 +14,10 @@ _TIMEOUT = httpx.Timeout(10.0)
 class SupervisorError(Exception):
     """The Supervisor (or Core through it) could not be reached or refused the request."""
 
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
 
 def describe_error(exc: BaseException) -> str:
     """A readable one-liner for an exception; some (timeouts) have an empty ``str``."""
@@ -94,7 +98,8 @@ class SupervisorClient:
             raise SupervisorError(f"{method} {path} failed: {describe_error(exc)}") from exc
         if response.is_error:
             raise SupervisorError(
-                f"{method} {path} returned {response.status_code}{_reason(response)}"
+                f"{method} {path} returned {response.status_code}{_reason(response)}",
+                status=response.status_code,
             )
         return response
 
