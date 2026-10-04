@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { en } from "@/i18n/en";
 import { es } from "@/i18n/es";
-import { detectLocale, translate, useI18n } from "@/i18n";
+import { detectLocale, translate, translatePlural, useI18n } from "@/i18n";
 
 const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 
@@ -25,6 +25,16 @@ describe("message catalogs", () => {
     }
   });
 
+  it("defines .one and .other together", () => {
+    const keys = Object.keys(en);
+    for (const key of keys.filter((k) => k.endsWith(".one"))) {
+      expect(keys, key).toContain(key.replace(/\.one$/, ".other"));
+    }
+    for (const key of keys.filter((k) => k.endsWith(".other"))) {
+      expect(keys, key).toContain(key.replace(/\.other$/, ".one"));
+    }
+  });
+
   it("uses flat dotted keys", () => {
     for (const key of Object.keys(en)) expect(key).toMatch(/^[a-z][A-Za-z0-9]*(\.[A-Za-z0-9]+)+$/);
   });
@@ -41,6 +51,16 @@ describe("useI18n", () => {
     expect(t("jobs.active", { n: 3 })).toContain("3");
     expect(t("jobs.active", { n: 3 })).not.toContain("{n}");
     expect(translate("jobs.active")).toContain("{n}");
+  });
+
+  it("picks the singular for exactly one and the plural otherwise", () => {
+    expect(translatePlural("library.count", 1)).toBe("1 sound");
+    expect(translatePlural("library.count", 0)).toBe("0 sounds");
+    expect(translatePlural("library.count", 12)).toBe("12 sounds");
+    expect(useI18n().tp("toast.bulk.queued", 3)).toBe("3 sounds queued");
+    useI18n().setLocale("es");
+    expect(translatePlural("library.count", 1)).toBe("1 sonido");
+    expect(translatePlural("library.count", 2)).toBe("2 sonidos");
   });
 
   it("switches language reactively and persists the choice", () => {

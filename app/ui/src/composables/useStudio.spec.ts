@@ -40,7 +40,7 @@ async function load() {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks(); // also drops queued mock*Once values a failing test left behind
   mocks.ui.state.mockResolvedValue(state);
   mocks.ui.categories.list.mockResolvedValue([category]);
   mocks.ui.seasons.list.mockResolvedValue([season]);
@@ -154,9 +154,10 @@ describe("useStudio", () => {
     expect(mocks.ui.categories.list).not.toHaveBeenCalled();
   });
 
-  it("clears a previous error when refreshSounds succeeds", async () => {
+  it("clears a previous error when refreshSounds succeeds once the studio has loaded", async () => {
     const { useStudio } = await load();
     const studio = useStudio();
+    await studio.refresh();
     mocks.ui.sounds.list.mockRejectedValueOnce(new Error("offline"));
     await studio.refreshSounds();
     expect(studio.error.value).toBe("offline");
@@ -164,20 +165,82 @@ describe("useStudio", () => {
     expect(studio.error.value).toBeNull();
   });
 
-  it("shares one in-flight refreshSounds request and fetches again afterwards", async () => {
+  it("keeps the error of a failed first load when a lightweight refreshSounds succeeds", async () => {
     const { useStudio } = await load();
     const studio = useStudio();
-    const gate = deferred<Sound[]>();
-    mocks.ui.sounds.list.mockReturnValueOnce(gate.promise);
-    const first = studio.refreshSounds();
-    const second = studio.refreshSounds();
-    expect(mocks.ui.sounds.list).toHaveBeenCalledTimes(1);
-    gate.resolve([sound]);
-    await Promise.all([first, second]);
-    expect(studio.sounds.value).toEqual([sound]);
+    mocks.ui.state.mockRejectedValueOnce(new Error("Studio is unreachable"));
+    await studio.refresh();
+    expect(studio.loaded.value).toBe(false);
+    expect(studio.error.value).toBe("Studio is unreachable");
 
+    // e.g. a job-completion poll succeeds while the categories/state are still missing
     await studio.refreshSounds();
+    expect(studio.sounds.value).toEqual([sound]);
+    expect(studio.error.value).toBe("Studio is unreachable");
+    expect(studio.loaded.value).toBe(false);
+
+    await studio.refresh(); // Retry
+    expect(studio.error.value).toBeNull();
+    expect(studio.loaded.value).toBe(true);
+  });
+
+  it("makes a refreshSounds call that arrives mid-flight wait, then fetch once more", async () => {
+    const { useStudio } = await load();
+    const studio = useStudio();
+    await studio.refresh();
+    mocks.ui.sounds.list.mockClear();
+    const first = deferred<Sound[]>();
+    const second = deferred<Sound[]>();
+    mocks.ui.sounds.list.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+
+    const a = studio.refreshSounds();
+    const b = studio.refreshSounds();
+    expect(mocks.ui.sounds.list).toHaveBeenCalledTimes(1);
+    let bSettled = false;
+    void b.then(() => (bSettled = true));
+
+    // the request that was already in flight may predate the caller's mutation: it must not satisfy b
+    first.resolve([sound]);
+    await a;
+    await Promise.resolve();
     expect(mocks.ui.sounds.list).toHaveBeenCalledTimes(2);
+    expect(bSettled).toBe(false);
+
+    second.resolve([sound, { id: "s2" } as Sound]);
+    await b;
+    expect(studio.sounds.value).toHaveLength(2);
+  });
+
+  it("coalesces many concurrent refreshSounds callers into one trailing request", async () => {
+    const { useStudio } = await load();
+    const studio = useStudio();
+    await studio.refresh();
+    mocks.ui.sounds.list.mockClear();
+    const first = deferred<Sound[]>();
+    mocks.ui.sounds.list.mockReturnValueOnce(first.promise);
+
+    const calls = [studio.refreshSounds(), studio.refreshSounds(), studio.refreshSounds(), studio.refreshSounds()];
+    expect(mocks.ui.sounds.list).toHaveBeenCalledTimes(1);
+    first.resolve([sound]);
+    await Promise.all(calls);
+    expect(mocks.ui.sounds.list).toHaveBeenCalledTimes(2);
+
+    // everything settled: the next call starts a fresh request
+    await studio.refreshSounds();
+    expect(mocks.ui.sounds.list).toHaveBeenCalledTimes(3);
+  });
+
+  it("still settles every caller (and keeps the error) when the trailing refreshSounds fails", async () => {
+    const { useStudio } = await load();
+    const studio = useStudio();
+    await studio.refresh();
+    const first = deferred<Sound[]>();
+    mocks.ui.sounds.list.mockReturnValueOnce(first.promise).mockRejectedValueOnce(new Error("blip"));
+    const a = studio.refreshSounds();
+    const b = studio.refreshSounds();
+    first.resolve([sound]);
+    await expect(Promise.all([a, b])).resolves.toBeDefined();
+    expect(studio.error.value).toBe("blip");
   });
 
   it("reports refreshSounds failures through error", async () => {

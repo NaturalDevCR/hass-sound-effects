@@ -61,25 +61,42 @@ function refresh(): Promise<void> {
 }
 
 let inflightSounds: Promise<void> | null = null;
+let trailingSounds: Promise<void> | null = null;
 
-/**
- * Lightweight reload used after jobs finish and after edits. Concurrent calls share one
- * request; a call made after it settled fetches again. A success clears `error`.
- */
-function refreshSounds(): Promise<void> {
-  if (inflightSounds) return inflightSounds;
-  const run = (async () => {
-    try {
-      sounds.value = await ui.sounds.list();
-      error.value = null;
-    } catch (cause) {
-      error.value = messageOf(cause);
-    }
-  })().finally(() => {
+async function loadSounds(): Promise<void> {
+  try {
+    sounds.value = await ui.sounds.list();
+    // Before the first full load `error` belongs to that failed load (its Retry banner): a
+    // lightweight success, e.g. a job-completion poll, must not wipe it.
+    if (loaded.value) error.value = null;
+  } catch (cause) {
+    error.value = messageOf(cause);
+  }
+}
+
+function fetchSounds(): Promise<void> {
+  const run = loadSounds().finally(() => {
     inflightSounds = null;
   });
   inflightSounds = run;
   return run;
+}
+
+/**
+ * Lightweight reload used after jobs finish and after edits. A request already in flight may
+ * have been sent before the caller's change landed, so a call made meanwhile waits for it and
+ * then fetches once more; every caller that arrives in the meantime shares that single trailing
+ * request. A success clears `error` once the studio has loaded.
+ */
+function refreshSounds(): Promise<void> {
+  const current = inflightSounds;
+  if (!current) return fetchSounds();
+  trailingSounds ??= current.then(() => {
+    trailingSounds = null;
+    // Another caller may already have started a (fresh enough) request in the gap.
+    return inflightSounds ?? fetchSounds();
+  });
+  return trailingSounds;
 }
 
 type Id = string | null | undefined;

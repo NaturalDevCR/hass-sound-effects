@@ -48,10 +48,24 @@ export function translate(key: MessageKey, params?: MessageParams): string {
   return text.replace(/\{(\w+)\}/g, (match, name: string) => (name in params ? String(params[name]) : match));
 }
 
+/** Bases `b` for which both `b.one` and `b.other` exist in the catalog. */
+export type PluralKey = {
+  [K in MessageKey]: K extends `${infer B}.one` ? (`${B}.other` extends MessageKey ? B : never) : never;
+}[MessageKey];
+
+/**
+ * Picks `<base>.one` for exactly 1 and `<base>.other` for everything else (0, 2, 1.5, ...),
+ * and fills `{n}` with the count. Both languages only need the one/other split.
+ */
+export function translatePlural(base: PluralKey, count: number, params: MessageParams = {}): string {
+  return translate(`${base}.${count === 1 ? "one" : "other"}`, { ...params, n: count });
+}
+
 export function useI18n(): {
   t: typeof translate;
+  tp: typeof translatePlural;
   locale: Ref<Locale>;
   setLocale: (value: Locale) => void;
 } {
-  return { t: translate, locale, setLocale };
+  return { t: translate, tp: translatePlural, locale, setLocale };
 }

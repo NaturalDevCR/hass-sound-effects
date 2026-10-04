@@ -1,0 +1,135 @@
+<script setup lang="ts">
+import { computed, ref, useId } from "vue";
+import { mdiClose, mdiPlus } from "@mdi/js";
+import Icon from "@/components/Icon.vue";
+import { useI18n } from "@/i18n";
+import { addTag, slugifyTag } from "@/lib/tags";
+
+// Generic tag list editor (v-model = the tags). Whatever is typed becomes a lowercase slug, the
+// same normalization the backend applies, so what you see is what gets stored. `suggestions` are
+// existing tags to pick from; the parent decides which ones to offer.
+const props = defineProps<{ modelValue: string[]; suggestions?: string[]; label?: string }>();
+const emit = defineEmits<{ "update:modelValue": [value: string[]] }>();
+
+const { t } = useI18n();
+const inputId = useId();
+const draft = ref("");
+
+const MAX_SUGGESTIONS = 12;
+
+const pending = computed(() => slugifyTag(draft.value));
+const offered = computed(() =>
+  (props.suggestions ?? [])
+    .filter((tag) => !props.modelValue.includes(tag) && (!pending.value || tag.includes(pending.value)))
+    .slice(0, MAX_SUGGESTIONS),
+);
+
+function commit(tags: string[]): void {
+  if (tags.length !== props.modelValue.length) emit("update:modelValue", tags);
+}
+
+function commitDraft(): void {
+  commit(addTag(props.modelValue, draft.value));
+  draft.value = "";
+}
+
+// Typing or pasting a comma ends a tag: everything before the last comma is committed, what
+// follows stays in the field. Handled on `input` (not keydown) because mobile keyboards report
+// their comma key as "Unidentified".
+function onInput(event: Event): void {
+  const el = event.target as HTMLInputElement;
+  const parts = el.value.split(",");
+  const rest = parts.pop() ?? "";
+  if (parts.length) commit(parts.reduce<string[]>(addTag, [...props.modelValue]));
+  draft.value = rest;
+  el.value = rest; // the ref may not change (""), so write the DOM value ourselves
+}
+
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Enter" || event.isComposing) return;
+  event.preventDefault(); // never submit an enclosing form
+  commitDraft();
+}
+
+function remove(tag: string): void {
+  emit(
+    "update:modelValue",
+    props.modelValue.filter((existing) => existing !== tag),
+  );
+}
+
+function pick(tag: string): void {
+  commit(addTag(props.modelValue, tag));
+}
+</script>
+
+<template>
+  <div>
+    <label :for="inputId" class="mb-1.5 block text-sm font-medium">{{ label ?? t("picker.tags.label") }}</label>
+    <div class="flex gap-2">
+      <input
+        :id="inputId"
+        :value="draft"
+        type="text"
+        class="field min-w-0 flex-1"
+        :placeholder="t('picker.tags.placeholder')"
+        enterkeyhint="done"
+        autocapitalize="none"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        @input="onInput"
+        @keydown="onKeydown"
+        @blur="commitDraft"
+      />
+      <button
+        data-test="add"
+        type="button"
+        class="btn shrink-0 px-3"
+        :disabled="!pending"
+        :aria-label="t('picker.tags.add')"
+        @mousedown.prevent
+        @click="commitDraft"
+      >
+        <Icon :path="mdiPlus" />
+      </button>
+    </div>
+
+    <ul v-if="modelValue.length" class="mt-2 flex flex-wrap gap-2">
+      <li
+        v-for="tag in modelValue"
+        :key="tag"
+        data-test="tag"
+        class="inline-flex h-9 max-w-full items-center rounded-full border border-line bg-raised pl-3 text-sm"
+      >
+        <span class="min-w-0 truncate">{{ tag }}</span>
+        <!-- The pill stays compact; the button reaches 44 px so a thumb can hit it. -->
+        <button
+          type="button"
+          class="-my-1 -mr-1.5 grid size-11 shrink-0 place-items-center rounded-full text-muted hover:text-ink"
+          :aria-label="t('picker.tags.remove', { tag })"
+          @click="remove(tag)"
+        >
+          <Icon :path="mdiClose" :size="16" />
+        </button>
+      </li>
+    </ul>
+
+    <div v-if="offered.length" data-test="suggestions" class="mt-3">
+      <p class="mb-1.5 text-xs text-muted">{{ t("picker.tags.suggestions") }}</p>
+      <div class="flex flex-wrap gap-2">
+        <button
+          v-for="tag in offered"
+          :key="tag"
+          data-test="suggestion"
+          type="button"
+          class="chip"
+          @click="pick(tag)"
+        >
+          <Icon :path="mdiPlus" :size="16" />
+          {{ tag }}
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
