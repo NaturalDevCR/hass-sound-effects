@@ -7,9 +7,10 @@ from typing import Any
 
 import httpx
 import pytest
-import sound_effects_studio.main as entry
 import uvicorn
 from fastapi import FastAPI
+
+import sound_effects_studio.main as entry
 from sound_effects_studio.app import create_app
 from sound_effects_studio.auth import INGRESS_PEER
 from sound_effects_studio.config import Paths

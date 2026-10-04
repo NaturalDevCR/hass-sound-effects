@@ -49,6 +49,9 @@ extend-exclude = [".venv", "build", "dist", "app/ui", "docs"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["sound_effects_studio", "custom_components"]
+
 [tool.pyright]
 include = ["app/src/sound_effects_studio", "custom_components/sound_effects"]
 typeCheckingMode = "strict"

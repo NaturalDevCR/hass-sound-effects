@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import date
 
 import pytest
+
 from sound_effects_studio.seasons import REGULAR, resolve_calendar_season, season_matches
 
 pytestmark = pytest.mark.studio

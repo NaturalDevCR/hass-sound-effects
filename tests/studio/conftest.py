@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+
 from sound_effects_studio.config import Paths
 
 

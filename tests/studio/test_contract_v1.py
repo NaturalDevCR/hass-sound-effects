@@ -9,6 +9,7 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
+
 from sound_effects_studio.app import create_app
 from sound_effects_studio.config import Paths
 from sound_effects_studio.models import Published, Recipe

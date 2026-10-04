@@ -3,6 +3,7 @@ import threading
 from collections.abc import Iterator
 
 import pytest
+
 from sound_effects_studio.config import Paths
 from sound_effects_studio.db import Database
 from sound_effects_studio.errors import ConflictError, InvalidError, NotFoundError

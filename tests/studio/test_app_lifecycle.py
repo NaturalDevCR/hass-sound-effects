@@ -12,9 +12,10 @@ from pathlib import Path
 
 import httpx
 import pytest
-import sound_effects_studio.lifecycle as lifecycle
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+import sound_effects_studio.lifecycle as lifecycle
 from sound_effects_studio.app import create_app
 from sound_effects_studio.config import Paths
 from sound_effects_studio.models import CategoryCreate, Settings

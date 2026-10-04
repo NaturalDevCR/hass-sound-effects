@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+
 from sound_effects_studio.auth import (
     INGRESS_PEER,
     TokenStore,

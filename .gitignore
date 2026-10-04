@@ -8,3 +8,4 @@ app/ui/dist/
 app/src/sound_effects_studio/static/
 .DS_Store
 coverage/
+.claude/

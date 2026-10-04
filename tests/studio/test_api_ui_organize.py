@@ -8,6 +8,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 from sound_effects_studio.app import create_app
 from sound_effects_studio.config import Paths
 from sound_effects_studio.models import CategoryUpdate, Recipe, Sound, SoundUpdate

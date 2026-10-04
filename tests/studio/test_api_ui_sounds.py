@@ -9,6 +9,7 @@ import threading
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+
 from sound_effects_studio import media
 from sound_effects_studio.app import create_app
 from sound_effects_studio.auth import INGRESS_PEER

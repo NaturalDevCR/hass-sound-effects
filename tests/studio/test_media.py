@@ -6,6 +6,7 @@ import subprocess
 import time
 
 import pytest
+
 import sound_effects_studio.media as media
 from sound_effects_studio.media import (
     LoudnessMeasurement,

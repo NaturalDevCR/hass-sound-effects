@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from sound_effects_studio.config import Paths, load_options
 
 pytestmark = pytest.mark.studio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from sound_effects_studio.errors import InvalidError, NotFoundError
 from sound_effects_studio.importer import ImportBrowser
 

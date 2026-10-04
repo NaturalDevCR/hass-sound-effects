@@ -8,6 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+
 from sound_effects_studio.config import Paths
 from sound_effects_studio.publisher import Publisher
 

@@ -10,6 +10,7 @@ import time
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
+
 import sound_effects_studio.media as media
 from sound_effects_studio.config import Paths
 from sound_effects_studio.db import Database

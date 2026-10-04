@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+
 from sound_effects_studio.seasons import resolve_calendar_season as studio_resolve
 
 CASES = json.loads(

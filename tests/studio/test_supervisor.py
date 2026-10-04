@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 import httpx
 import pytest
+
 from sound_effects_studio.supervisor import SupervisorClient, SupervisorError, describe_error
 
 pytestmark = pytest.mark.studio

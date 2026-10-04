@@ -9,9 +9,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-import sound_effects_studio.app as app_module
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
+
+import sound_effects_studio.app as app_module
 from sound_effects_studio import __version__
 from sound_effects_studio.app import create_app
 from sound_effects_studio.auth import INGRESS_PEER
