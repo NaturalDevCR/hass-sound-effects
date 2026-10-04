@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { useRoute, useRouter, type LocationQueryRaw } from "vue-router";
+import { computed, onBeforeUnmount, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import {
   mdiAlertCircleOutline,
   mdiCheckboxMultipleMarkedOutline,
@@ -11,127 +11,52 @@ import {
   mdiMusicOff,
   mdiUpload,
 } from "@mdi/js";
-import { audioUrl, ui } from "@/api/client";
-import type { BulkResult, BulkSet, Season, SoundStatus } from "@/api/types";
-import BulkBar, { type BulkAction } from "@/components/BulkBar.vue";
+import { audioUrl } from "@/api/client";
+import type { Season } from "@/api/types";
+import BulkBar from "@/components/BulkBar.vue";
 import CategoryChips from "@/components/CategoryChips.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import Icon from "@/components/Icon.vue";
-import LibraryDialog, { type LibraryDialogKind, type LibraryDialogResult } from "@/components/LibraryDialog.vue";
+import LibraryDialog from "@/components/LibraryDialog.vue";
 import LoudnessStrip from "@/components/LoudnessStrip.vue";
 import SoundItem from "@/components/SoundItem.vue";
-import { useConfirm } from "@/composables/useConfirm";
-import { useJobs } from "@/composables/useJobs";
+import { STATUSES, useLibraryFilters, type FilterKey } from "@/composables/useLibraryFilters";
 import { usePlayer } from "@/composables/usePlayer";
+import { useSelection } from "@/composables/useSelection";
 import { useStudio } from "@/composables/useStudio";
-import { useToast } from "@/composables/useToast";
 import { useI18n } from "@/i18n";
-import { filterSounds, type LibraryFilter } from "@/lib/filters";
+import { filterSounds } from "@/lib/filters";
 
-const { t, tp, locale } = useI18n();
+const { t, tp } = useI18n();
 const route = useRoute();
 const router = useRouter();
-const studio = useStudio();
-const { sounds, categories, seasons, loaded, loading, categoryById, seasonById, refresh } = studio;
+const { sounds, categories, seasons, loaded, loading, categoryById, seasonById, refresh } = useStudio();
 const player = usePlayer();
-const toast = useToast();
-const { confirm } = useConfirm();
 
-// --- filters: the route query is the source of truth (?c= ?s= ?t= ?q= ?st=) --------------------
-const STATUSES: SoundStatus[] = ["processing", "ready", "rendering", "failed"];
-const SEARCH_DEBOUNCE_MS = 150;
-type FilterKey = "c" | "s" | "t" | "q" | "st";
-const FILTER_KEYS: FilterKey[] = ["c", "s", "t", "q", "st"];
-
-function rawParam(key: FilterKey): string | null {
-  const value = route.query[key];
-  const first = Array.isArray(value) ? value[0] : value;
-  return typeof first === "string" && first !== "" ? first : null;
-}
-
-const collator = computed(() => new Intl.Collator(locale.value, { sensitivity: "base", numeric: true }));
-const sortedSounds = computed(() =>
-  [...sounds.value].sort((a, b) => collator.value.compare(a.title, b.title) || a.id.localeCompare(b.id)),
-);
-const soundsById = computed(() => new Map(sounds.value.map((s) => [s.id, s])));
-const allTags = computed(() => [...new Set(sounds.value.flatMap((s) => s.tags))].sort(collator.value.compare));
-
-// A stale or hand-edited URL must not hide everything: unknown values count as "no filter" once
-// the lists have loaded (before that they cannot be judged, and the list is not shown anyway).
-const filter = computed<LibraryFilter>(() => {
-  const known = <T,>(value: string | null, exists: (v: string) => T | undefined | boolean) =>
-    value !== null && (!loaded.value || exists(value)) ? value : null;
-  const status = rawParam("st");
-  return {
-    categoryId: known(rawParam("c"), categoryById),
-    seasonId: known(rawParam("s"), seasonById),
-    tag: known(rawParam("t"), (tag) => allTags.value.includes(tag)),
-    query: rawParam("q") ?? "",
-    status: STATUSES.find((s) => s === status) ?? null,
-  };
-});
-const hasFilters = computed(() => Object.values(filter.value).some((v) => v !== null && v !== ""));
-
-// On phones the three selects hide behind a "Filters" button (a badge counts the active ones) so
-// the list starts near the top of the screen; they are always visible from md up. A link that
-// already carries one of them opens the panel.
-const filtersOpen = ref(Boolean(rawParam("s") || rawParam("t") || rawParam("st")));
-const panelFilterCount = computed(() => [filter.value.seasonId, filter.value.tag, filter.value.status].filter(Boolean).length);
-
-// Navigation is asynchronous: two changes made before the first one lands must build on each
-// other instead of both starting from the stale route.
-let pendingQuery: LocationQueryRaw | null = null;
-
-function setQuery(patch: Partial<Record<FilterKey, string | null>>): void {
-  const next: LocationQueryRaw = { ...(pendingQuery ?? route.query) };
-  for (const key of FILTER_KEYS) {
-    if (!(key in patch)) continue;
-    const value = patch[key];
-    if (value) next[key] = value;
-    else delete next[key];
-  }
-  pendingQuery = next;
-  // replace, not push: tweaking filters should not bury the editor's Back target
-  void router.replace({ query: next }).finally(() => {
-    if (pendingQuery === next) pendingQuery = null;
-  });
-}
-
-// The search box keeps what is typed; the route only learns about it 150 ms after the last key.
-const search = ref(rawParam("q") ?? "");
-let searchTimer: ReturnType<typeof setTimeout> | undefined;
-
-function onSearchInput(): void {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
-    searchTimer = undefined;
-    setQuery({ q: search.value.trim() });
-  }, SEARCH_DEBOUNCE_MS);
-}
-
-// External changes (clear filters, a pasted URL, Back) flow into the box, but never while the
-// user is still typing: a late route update would overwrite newer keystrokes.
-watch(
-  () => rawParam("q"),
-  (value) => {
-    if (searchTimer === undefined && (value ?? "") !== search.value.trim()) search.value = value ?? "";
-  },
-);
-
-function clearFilters(): void {
-  clearTimeout(searchTimer);
-  searchTimer = undefined;
-  search.value = "";
-  setQuery({ c: null, s: null, t: null, q: null, st: null });
-}
+// --- filters (query state lives in the composable) ------------------------------------------
+const {
+  filter,
+  hasFilters,
+  allTags,
+  collator,
+  search,
+  onSearchInput,
+  setQuery,
+  clearFilters,
+  filtersOpen,
+  panelFilterCount,
+} = useLibraryFilters();
 
 function onSelect(key: FilterKey, event: Event): void {
   setQuery({ [key]: (event.target as HTMLSelectElement).value });
 }
 
 // --- derived lists ---------------------------------------------------------------------------
+const sortedSounds = computed(() =>
+  [...sounds.value].sort((a, b) => collator.value.compare(a.title, b.title) || a.id.localeCompare(b.id)),
+);
+const soundsById = computed(() => new Map(sounds.value.map((s) => [s.id, s])));
 const visible = computed(() => filterSounds(sortedSounds.value, filter.value));
-const visibleIds = computed(() => new Set(visible.value.map((s) => s.id)));
 
 // Chip counts answer "how many would I see?": every filter applies except the category itself.
 const facet = computed(() => filterSounds(sortedSounds.value, { ...filter.value, categoryId: null }));
@@ -153,9 +78,19 @@ const resultCount = computed(() =>
     : tp("library.count", sounds.value.length),
 );
 
-function seasonsOf(sound: { seasons: string[] }): Season[] {
-  return sound.seasons.map((id) => seasonById(id)).filter((s): s is Season => s !== undefined);
-}
+// One array per sound, rebuilt only when sounds or seasons change. Building it in the template
+// would hand every row a fresh array on each render of this view (every keystroke in the search
+// box) and make all of them re-render for nothing.
+const NO_SEASONS: Season[] = [];
+const seasonsBySound = computed(
+  () =>
+    new Map(
+      sounds.value.map((sound) => [
+        sound.id,
+        sound.seasons.map((id) => seasonById(id)).filter((s): s is Season => s !== undefined),
+      ]),
+    ),
+);
 
 // --- open and play ---------------------------------------------------------------------------
 function openSound(id: string): void {
@@ -168,160 +103,30 @@ function togglePlay(id: string): void {
   if (published) player.toggle(id, audioUrl(id, "published", published.revision));
 }
 
-onBeforeUnmount(() => {
-  clearTimeout(searchTimer);
-  player.stop();
-});
+onBeforeUnmount(() => player.stop());
 
-// --- selection -------------------------------------------------------------------------------
-const selectMode = ref(false);
-const selected = ref<Set<string>>(new Set());
-
-function toggleSelect(id: string): void {
-  selectMode.value = true;
-  const next = new Set(selected.value);
-  if (!next.delete(id)) next.add(id);
-  selected.value = next;
-}
-
-function selectAll(): void {
-  selected.value = new Set(visibleIds.value);
-}
-
-function exitSelection(): void {
-  selectMode.value = false;
-  selected.value = new Set();
-  actionError.value = null;
-}
-
-function toggleSelectMode(): void {
-  if (selectMode.value) exitSelection();
-  else selectMode.value = true;
-}
-
-// Bulk actions only ever touch what is on screen: narrowing the list narrows the selection.
-watch(visibleIds, (ids) => {
-  if (!selected.value.size) return;
-  const kept = [...selected.value].filter((id) => ids.has(id));
-  if (kept.length !== selected.value.size) selected.value = new Set(kept);
-});
-
-// Nothing left to act on (everything was deleted, here or elsewhere): no empty bulk bar.
-watch(
-  () => sounds.value.length,
-  (count) => {
-    if (count === 0) exitSelection();
-  },
-);
-
-function onEscape(): void {
-  if (selectMode.value && dialog.value === null) exitSelection();
-}
-
-// --- bulk actions ----------------------------------------------------------------------------
-const busy = ref(false);
-const actionError = ref<string | null>(null);
-const dialog = ref<LibraryDialogKind | null>(null);
-const levelCategoryId = ref<string | null>(null);
-
-const messageOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
-
-const bulkMessage = (result: BulkResult) =>
-  result.queued > 0 ? tp("toast.bulk.queued", result.queued) : tp("toast.bulk.updated", result.updated);
-
-/** Runs one request: pending state, inline error, success toast, then fresh sounds and jobs. */
-async function perform(work: () => Promise<string>): Promise<boolean> {
-  if (busy.value) return false;
-  busy.value = true;
-  actionError.value = null;
-  try {
-    toast.push(await work(), "success");
-    // Renders may have been queued: refresh both lists (neither refresh throws).
-    await Promise.all([studio.refreshSounds(), useJobs().refresh()]);
-    return true;
-  } catch (cause) {
-    actionError.value = messageOf(cause);
-    return false;
-  } finally {
-    busy.value = false;
-  }
-}
-
-const bulk = (set: BulkSet) => perform(async () => bulkMessage(await ui.sounds.bulk({ ids: [...selected.value], set })));
-
-async function onBulkAction(action: BulkAction): Promise<void> {
-  actionError.value = null;
-  switch (action) {
-    case "enable":
-    case "disable":
-      await bulk({ enabled: action === "enable" });
-      return;
-    case "delete": {
-      const ids = [...selected.value];
-      const confirmed = await confirm({
-        title: tp("library.confirm.delete.title", ids.length),
-        message: t("library.confirm.delete.message"),
-        confirmLabel: t("common.delete"),
-        danger: true,
-      });
-      if (!confirmed) return;
-      const done = await perform(async () => tp("toast.bulk.deleted", (await ui.sounds.bulkDelete(ids)).deleted));
-      if (done) exitSelection();
-      return;
-    }
-    default:
-      dialog.value = action;
-  }
-}
-
-function openLevel(): void {
-  if (!activeCategory.value) return;
-  levelCategoryId.value = activeCategory.value.id;
-  actionError.value = null;
-  dialog.value = "level";
-}
-
-function closeDialog(): void {
-  if (busy.value) return;
-  dialog.value = null;
-  actionError.value = null;
-}
-
-async function onDialogSubmit(result: LibraryDialogResult): Promise<void> {
-  let done: boolean;
-  switch (result.kind) {
-    case "category":
-      done = await bulk({ category_id: result.categoryId });
-      break;
-    case "seasons":
-      done = await bulk({ seasons: result.seasons, all_seasons: result.allSeasons });
-      break;
-    case "tags":
-      done = await bulk({
-        ...(result.add.length ? { add_tags: result.add } : {}),
-        ...(result.remove.length ? { remove_tags: result.remove } : {}),
-      });
-      break;
-    case "normalize":
-      done = await bulk({ profile_id: result.profileId });
-      break;
-    case "level": {
-      const categoryId = levelCategoryId.value;
-      if (!categoryId) return;
-      done = await perform(async () =>
-        tp("toast.bulk.queued", (await ui.profiles.apply(result.profileId, { category_id: categoryId })).queued),
-      );
-      break;
-    }
-  }
-  if (done) dialog.value = null;
-}
-
-const selectedTags = computed(() => [
-  ...new Set([...selected.value].flatMap((id) => soundsById.value.get(id)?.tags ?? [])),
-]);
-const levelCategory = computed(() => (levelCategoryId.value ? categoryById(levelCategoryId.value) : undefined));
-const dialogCount = computed(() => selected.value.size);
+// --- selection and bulk actions (state lives in the composable) -----------------------------
+const selectToggle = ref<HTMLButtonElement | null>(null);
+const {
+  selectMode,
+  selected,
+  note,
+  busy,
+  actionError,
+  dialog,
+  dialogCount,
+  selectedTags,
+  levelCategory,
+  toggleSelect,
+  selectAll,
+  exitSelection,
+  toggleSelectMode,
+  onEscape,
+  onBulkAction,
+  openLevel,
+  closeDialog,
+  onDialogSubmit,
+} = useSelection({ visible, activeCategory, returnFocusTo: selectToggle });
 </script>
 
 <template>
@@ -388,6 +193,7 @@ const dialogCount = computed(() => selected.value.size);
             />
           </div>
           <button
+            ref="selectToggle"
             data-test="select-toggle"
             type="button"
             class="btn shrink-0"
@@ -414,8 +220,9 @@ const dialogCount = computed(() => selected.value.size);
         />
 
         <!-- Phones: [Filters] ... [count], with the selects opening on their own line below.
-             md and up: the selects fill the row and the count sits at its end. -->
-        <div class="flex flex-wrap items-center gap-x-2 gap-y-3 md:flex-nowrap">
+             lg and up: the selects fill the row and the count sits at its end (from md the selects take
+             the full row, otherwise Spanish labels get clipped next to the sidebar). -->
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-3 lg:flex-nowrap">
           <button
             data-test="filters-toggle"
             type="button"
@@ -443,7 +250,7 @@ const dialogCount = computed(() => selected.value.size);
           </p>
           <div
             id="library-filters"
-            class="min-w-0 basis-full grid-cols-2 gap-2 sm:grid-cols-4 md:order-first md:flex-1 md:basis-0"
+            class="min-w-0 basis-full grid-cols-1 gap-2 min-[28rem]:grid-cols-2 md:order-first lg:flex-1 lg:basis-0 xl:grid-cols-4"
             :class="filtersOpen ? 'grid' : 'hidden md:grid'"
           >
             <select
@@ -501,7 +308,7 @@ const dialogCount = computed(() => selected.value.size);
             v-for="sound in visible"
             :key="sound.id"
             :sound="sound"
-            :seasons="seasonsOf(sound)"
+            :seasons="seasonsBySound.get(sound.id) ?? NO_SEASONS"
             :category="filter.categoryId ? undefined : categoryById(sound.category_id)"
             :playing="player.playing.value && player.currentId.value === sound.id"
             :selected="selected.has(sound.id)"
@@ -534,6 +341,7 @@ const dialogCount = computed(() => selected.value.size);
         :total="visible.length"
         :busy="busy"
         :error="dialog === null ? actionError : null"
+        :note="note"
         @action="onBulkAction"
         @select-all="selectAll"
         @done="exitSelection"

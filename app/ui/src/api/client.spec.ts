@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, api, audioUrl, ui } from "@/api/client";
+import { ApiError, api, audioUrl, messageOf, ui } from "@/api/client";
 import { useI18n } from "@/i18n";
 
 const fetchMock = vi.fn();
@@ -285,5 +285,15 @@ describe("ui endpoints", () => {
 
   it("encodes path segments", async () => {
     expect(await call(() => ui.sounds.get("a/b"))).toMatchObject({ url: "api/ui/sounds/a%2Fb" });
+  });
+});
+
+describe("messageOf()", () => {
+  it("uses the API detail, the message of any other Error, or the stringified value", () => {
+    expect(messageOf(new ApiError(409, "Category already exists"))).toBe("Category already exists");
+    expect(messageOf(new Error("offline"))).toBe("offline");
+    expect(messageOf("plain text")).toBe("plain text");
+    expect(messageOf(42)).toBe("42");
+    expect(messageOf(undefined)).toBe("undefined");
   });
 });

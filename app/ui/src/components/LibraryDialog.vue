@@ -20,6 +20,7 @@ import Sheet from "@/components/Sheet.vue";
 import TagEditor from "@/components/TagEditor.vue";
 import { useStudio } from "@/composables/useStudio";
 import { useI18n, type MessageKey } from "@/i18n";
+import { addTag } from "@/lib/tags";
 
 // The one dialog behind the bulk bar's Category / Seasons / Tags / Normalize actions and the
 // loudness strip's "Level this category". It owns the form state and resets it every time it
@@ -46,21 +47,38 @@ const { categories } = useStudio();
 const categoryId = ref("");
 const seasonChoice = ref<SeasonSelection>({ seasons: [], all_seasons: false });
 const addTags = ref<string[]>([]);
+const addDraft = ref("");
 const removeTags = ref<string[]>([]);
+const removeDraft = ref("");
 const profile = ref<string | null | undefined>(undefined);
+
+// What the dialog shows is a snapshot taken when it opens. The parent clears `kind` (and may
+// change the count, category...) the moment it closes, while the Sheet is still fading out: the
+// title and form must not flicker or switch to empty into that fade.
+const shown = ref({
+  kind: props.kind,
+  count: props.count,
+  categoryName: props.categoryName,
+});
 
 watch(
   () => props.kind,
   (kind) => {
     if (kind === null) return;
+    shown.value = { kind, count: props.count, categoryName: props.categoryName };
     categoryId.value = "";
     seasonChoice.value = { seasons: [], all_seasons: false };
     addTags.value = [];
+    addDraft.value = "";
     removeTags.value = [];
+    removeDraft.value = "";
     profile.value = kind === "level" ? (props.defaultProfileId ?? undefined) : undefined;
   },
   { immediate: true },
 );
+
+/** The kind being shown: the last one opened, even while the Sheet fades out. */
+const current = computed(() => shown.value.kind);
 
 const titles: Record<LibraryDialogKind, MessageKey> = {
   category: "library.dialog.category.title",
@@ -69,21 +87,22 @@ const titles: Record<LibraryDialogKind, MessageKey> = {
   normalize: "library.dialog.normalize.title",
   level: "library.dialog.level.title",
 };
-const title = computed(() =>
-  props.kind ? t(titles[props.kind], { category: props.categoryName ?? "" }) : "",
-);
+const title = computed(() => (current.value ? t(titles[current.value], { category: shown.value.categoryName ?? "" }) : ""));
 
-const tagConflict = computed(() => addTags.value.some((tag) => removeTags.value.includes(tag)));
+// Text typed in a tag field but never confirmed counts as intended: Apply must not drop it.
+const effectiveAdd = computed(() => addTag(addTags.value, addDraft.value));
+const effectiveRemove = computed(() => addTag(removeTags.value, removeDraft.value));
+const tagConflict = computed(() => effectiveAdd.value.some((tag) => effectiveRemove.value.includes(tag)));
 const seasonsValid = computed(() => seasonChoice.value.all_seasons || seasonChoice.value.seasons.length > 0);
 
 const valid = computed(() => {
-  switch (props.kind) {
+  switch (current.value) {
     case "category":
       return categoryId.value !== "";
     case "seasons":
       return seasonsValid.value;
     case "tags":
-      return (addTags.value.length > 0 || removeTags.value.length > 0) && !tagConflict.value;
+      return (effectiveAdd.value.length > 0 || effectiveRemove.value.length > 0) && !tagConflict.value;
     case "normalize":
       return profile.value !== undefined;
     case "level":
@@ -94,8 +113,8 @@ const valid = computed(() => {
 });
 
 function submit(): void {
-  if (!valid.value || props.pending) return;
-  switch (props.kind) {
+  if (props.kind === null || !valid.value || props.pending) return;
+  switch (current.value) {
     case "category":
       emit("submit", { kind: "category", categoryId: categoryId.value });
       break;
@@ -107,7 +126,7 @@ function submit(): void {
       });
       break;
     case "tags":
-      emit("submit", { kind: "tags", add: addTags.value, remove: removeTags.value });
+      emit("submit", { kind: "tags", add: effectiveAdd.value, remove: effectiveRemove.value });
       break;
     case "normalize":
       emit("submit", { kind: "normalize", profileId: profile.value ?? null });
@@ -120,12 +139,12 @@ function submit(): void {
 </script>
 
 <template>
-  <Sheet :open="kind !== null" :title="title" @close="emit('close')">
-    <div v-if="kind" class="space-y-4">
-      <p v-if="kind === 'level'" class="text-sm text-muted">{{ t("library.dialog.level.hint") }}</p>
-      <p v-else class="text-sm text-muted">{{ tp("library.dialog.scope", count) }}</p>
+  <Sheet :open="props.kind !== null" :title="title" @close="emit('close')">
+    <div v-if="current" class="space-y-4">
+      <p v-if="current === 'level'" class="text-sm text-muted">{{ t("library.dialog.level.hint") }}</p>
+      <p v-else class="text-sm text-muted">{{ tp("library.dialog.scope", shown.count) }}</p>
 
-      <div v-if="kind === 'category'">
+      <div v-if="current === 'category'">
         <label for="library-dialog-category" class="mb-1.5 block text-sm font-medium">
           {{ t("library.dialog.category.label") }}
         </label>
@@ -135,23 +154,33 @@ function submit(): void {
         </select>
       </div>
 
-      <template v-else-if="kind === 'seasons'">
+      <template v-else-if="current === 'seasons'">
         <SeasonPicker v-model="seasonChoice" />
         <p v-if="!seasonsValid" class="text-sm text-warn">{{ t("library.dialog.seasons.invalid") }}</p>
       </template>
 
-      <template v-else-if="kind === 'tags'">
-        <TagEditor v-model="addTags" :suggestions="allTags" :label="t('library.dialog.tags.add')" />
-        <TagEditor v-model="removeTags" :suggestions="selectedTags" :label="t('library.dialog.tags.remove')" />
+      <template v-else-if="current === 'tags'">
+        <TagEditor
+          v-model="addTags"
+          v-model:draft="addDraft"
+          :suggestions="allTags"
+          :label="t('library.dialog.tags.add')"
+        />
+        <TagEditor
+          v-model="removeTags"
+          v-model:draft="removeDraft"
+          :suggestions="selectedTags"
+          :label="t('library.dialog.tags.remove')"
+        />
         <p v-if="tagConflict" role="alert" class="text-sm text-danger">{{ t("library.dialog.tags.conflict") }}</p>
       </template>
 
-      <template v-else-if="kind === 'normalize'">
+      <template v-else-if="current === 'normalize'">
         <p class="text-sm text-muted">{{ t("library.dialog.normalize.hint") }}</p>
         <ProfilePicker v-model="profile" allow-none />
       </template>
 
-      <ProfilePicker v-else-if="kind === 'level'" v-model="profile" />
+      <ProfilePicker v-else-if="current === 'level'" v-model="profile" />
     </div>
 
     <template #footer>
@@ -176,7 +205,7 @@ function submit(): void {
           @click="submit"
         >
           <Icon v-if="pending" :path="mdiLoading" class="animate-spin" />
-          {{ kind === "level" ? t("library.dialog.level.apply") : t("common.apply") }}
+          {{ current === "level" ? t("library.dialog.level.apply") : t("common.apply") }}
         </button>
       </div>
     </template>

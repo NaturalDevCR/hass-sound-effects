@@ -74,7 +74,7 @@ describe("SoundItem", () => {
     const play = wrapper.get('[data-test="play"]');
     expect(play.classes()).toContain("size-12");
     expect(play.attributes("aria-label")).toBe("Play Front door");
-    expect(play.attributes("aria-pressed")).toBe("false");
+    expect(play.attributes("aria-pressed")).toBeUndefined(); // the flipping label carries the state
     expect(play.get("path").attributes("d")).toBe(mdiPlay);
     await play.trigger("click");
     expect(wrapper.emitted("toggle-play")).toEqual([["s1"]]);
@@ -83,7 +83,7 @@ describe("SoundItem", () => {
 
   it("shows the playing state", () => {
     const play = mountItem({ playing: true }).get('[data-test="play"]');
-    expect(play.attributes("aria-pressed")).toBe("true");
+    expect(play.attributes("aria-pressed")).toBeUndefined();
     expect(play.attributes("aria-label")).toBe("Stop Front door");
     expect(play.get("path").attributes("d")).toBe(mdiStop);
   });

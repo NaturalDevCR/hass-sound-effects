@@ -141,6 +141,8 @@ export const en = {
   "library.bulk.enable": "Enable",
   "library.bulk.disable": "Disable",
   "library.bulk.delete": "Delete",
+  "library.bulk.pruned.one": "1 selected sound is hidden by the filters and was deselected.",
+  "library.bulk.pruned.other": "{n} selected sounds are hidden by the filters and were deselected.",
 
   "library.dialog.scope.one": "This changes the 1 selected sound.",
   "library.dialog.scope.other": "This changes the {n} selected sounds.",
@@ -179,6 +181,7 @@ export const en = {
   "picker.tags.add": "Add tag",
   "picker.tags.remove": "Remove tag {tag}",
   "picker.tags.suggestions": "Existing tags",
+  "picker.tags.pending": "Will be added as “{tag}”",
   "picker.profile.label": "Normalization profile",
   "picker.profile.none": "No normalization",
   "picker.profile.noneHint": "Keep the original loudness",

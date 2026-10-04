@@ -1,5 +1,6 @@
 import { mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it } from "vitest";
+import { nextTick } from "vue";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CategoryChips from "@/components/CategoryChips.vue";
 import { useI18n } from "@/i18n";
 import { makeCategory } from "@/test/factories";
@@ -16,6 +17,10 @@ function mountChips(modelValue: string | null = null) {
 }
 
 beforeEach(() => useI18n().setLocale("en"));
+afterEach(() => {
+  delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  document.body.innerHTML = "";
+});
 
 describe("CategoryChips", () => {
   it("renders All plus one chip per category, each with its count", () => {
@@ -58,5 +63,43 @@ describe("CategoryChips", () => {
   it("treats a missing count as zero", () => {
     const wrapper = mount(CategoryChips, { props: { categories, modelValue: null, counts: {}, total: 0 } });
     expect(wrapper.findAll("button").map((c) => c.text())).toEqual(["All 0", "Doors 0", "Alerts 0"]);
+  });
+
+  describe("scrolling the active chip into view", () => {
+    function spyOnScroll() {
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView;
+      return scrollIntoView;
+    }
+    const names = (spy: ReturnType<typeof vi.fn>) => spy.mock.contexts.map((el) => (el as HTMLElement).textContent?.trim());
+
+    it("does it on mount, for a category restored from the URL", async () => {
+      const scrollIntoView = spyOnScroll();
+      mount(CategoryChips, {
+        props: { categories, modelValue: "alerts", counts: { doors: 4, alerts: 0 }, total: 4 },
+        attachTo: document.body,
+      });
+      await nextTick();
+      expect(names(scrollIntoView)).toEqual(["Alerts 0"]);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "center" });
+    });
+
+    it("does it again when the selection changes", async () => {
+      const scrollIntoView = spyOnScroll();
+      const wrapper = mount(CategoryChips, {
+        props: { categories, modelValue: null, counts: { doors: 4, alerts: 0 }, total: 4 },
+        attachTo: document.body,
+      });
+      await nextTick();
+      await wrapper.setProps({ modelValue: "doors" });
+      await nextTick();
+      expect(names(scrollIntoView)).toEqual(["All 4", "Doors 4"]);
+    });
+
+    it("copes with browsers that lack scrollIntoView", async () => {
+      expect(() =>
+        mount(CategoryChips, { props: { categories, modelValue: "doors", counts: {}, total: 0 }, attachTo: document.body }),
+      ).not.toThrow();
+    });
   });
 });

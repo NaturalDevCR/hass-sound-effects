@@ -73,6 +73,33 @@ describe("TagEditor", () => {
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
 
+  it("does not let the remove buttons steal focus either", async () => {
+    const wrapper = mountEditor({ modelValue: ["es"] });
+    const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    wrapper.get('[aria-label="Remove tag es"]').element.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+  });
+
+  describe("draft", () => {
+    it("previews the slug that will be stored while typing", async () => {
+      const wrapper = mountEditor();
+      expect(wrapper.find('[data-test="pending"]').exists()).toBe(false);
+      await type(wrapper, "Kids Room");
+      expect(wrapper.get('[data-test="pending"]').text()).toBe("Will be added as “kids_room”");
+      expect(wrapper.get("input").attributes("aria-describedby")).toBe(wrapper.get('[data-test="pending"]').attributes("id"));
+    });
+
+    it("mirrors the uncommitted text through v-model:draft", async () => {
+      const wrapper = mountEditor({ draft: "" });
+      await type(wrapper, "kid");
+      expect(wrapper.emitted("update:draft")?.at(-1)).toEqual(["kid"]);
+      await wrapper.setProps({ draft: "kids" });
+      expect((wrapper.get("input").element as HTMLInputElement).value).toBe("kids");
+      await wrapper.get("input").trigger("keydown", { key: "Enter" });
+      expect(wrapper.emitted("update:draft")?.at(-1)).toEqual([""]);
+    });
+  });
+
   it("has an Add button for touch keyboards without an obvious Enter", async () => {
     const wrapper = mountEditor();
     const add = wrapper.get('[data-test="add"]');
@@ -99,6 +126,24 @@ describe("TagEditor", () => {
       expect(chips.map((c) => c.text())).toEqual(["bath", "en", "kids"]);
       await chips[2]!.trigger("click");
       expect(wrapper.emitted("update:modelValue")).toEqual([[["es", "kids"]]]);
+    });
+
+    it("adds exactly the suggestion when it is picked while a partial tag is typed", async () => {
+      const wrapper = mountEditor({ suggestions });
+      const input = wrapper.get("input");
+      await type(wrapper, "ki");
+      const chip = wrapper.get('[data-test="suggestion"]');
+      expect(chip.text()).toBe("kids");
+
+      // In a browser mousedown moves focus off the field, and the blur would commit "ki" as a tag
+      // (and the re-render could swallow the click). The chip must not take focus.
+      const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+      chip.element.dispatchEvent(down);
+      expect(down.defaultPrevented).toBe(true);
+
+      await chip.trigger("click");
+      expect(wrapper.emitted("update:modelValue")).toEqual([[["kids"]]]);
+      expect((input.element as HTMLInputElement).value).toBe("");
     });
 
     it("narrows them as you type", async () => {

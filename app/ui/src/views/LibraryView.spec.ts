@@ -3,6 +3,7 @@ import { defineComponent, h } from "vue";
 import { createMemoryHistory, RouterView, type Router } from "vue-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/api/client";
+import SoundItem from "@/components/SoundItem.vue";
 import { useConfirm } from "@/composables/useConfirm";
 import { useStudio } from "@/composables/useStudio";
 import { useToast } from "@/composables/useToast";
@@ -191,6 +192,15 @@ describe("listing", () => {
     expect(row.get('[data-test="chips"]').text()).toContain("Halloween");
   });
 
+  it("hands every row the same seasons array while typing in the search box", async () => {
+    const { wrapper } = await mountLibrary();
+    const rows = wrapper.findAllComponents(SoundItem);
+    const before = rows.map((row) => row.props("seasons"));
+    await wrapper.get('[data-test="search"]').setValue("be"); // re-renders the view, not the data
+    expect(rows.map((row) => row.props("seasons"))).toEqual(before);
+    rows.forEach((row, i) => expect(row.props("seasons")).toBe(before[i]));
+  });
+
   it("shows category chips with counts that follow the other filters", async () => {
     const { wrapper } = await mountLibrary("/?q=bell");
     const chips = wrapper.findAll('[role="group"] button').map((b) => b.text());
@@ -263,6 +273,15 @@ describe("filters in the route query", () => {
     const { wrapper } = await mountLibrary();
     const options = wrapper.get('[data-test="filter-tag"]').findAll("option").map((o) => o.text());
     expect(options).toEqual(["All tags", "bath", "es", "kids"]);
+  });
+
+  it("spells out the select defaults in Spanish so they are not mistaken for a single item", async () => {
+    useI18n().setLocale("es");
+    const { wrapper } = await mountLibrary();
+    const first = (test: string) => wrapper.get(`[data-test="${test}"]`).findAll("option")[0]!.text();
+    expect(first("filter-season")).toBe("Todas las temporadas");
+    expect(first("filter-tag")).toBe("Todas las etiquetas");
+    expect(first("filter-status")).toBe("Cualquier estado");
   });
 
   it("restores the filters from the URL", async () => {
@@ -350,8 +369,8 @@ describe("opening and playing", () => {
     player.currentId.value = "s2";
     player.playing.value = true;
     const { wrapper } = await mountLibrary();
-    const states = wrapper.findAll('[data-test="play"]').map((p) => p.attributes("aria-pressed"));
-    expect(states).toEqual(["false", "true", "false", "false"]);
+    const labels = wrapper.findAll('[data-test="play"]').map((p) => p.attributes("aria-label"));
+    expect(labels).toEqual(["Play Bell", "Stop Léon's knock", "Play Muted chime", "Play Zebra crossing"]);
   });
 
   it("stops playback when leaving the library", async () => {
@@ -443,12 +462,73 @@ describe("selection", () => {
     expect(wrapper.find('[role="toolbar"]').exists()).toBe(false);
   });
 
-  it("drops selected sounds that a filter change hides", async () => {
+  it("drops selected sounds that a filter change hides, and says so", async () => {
     const { wrapper } = await mountLibrary();
-    await enterSelection(wrapper, "Bell", "Zebra crossing");
+    await enterSelection(wrapper, "Bell", "Zebra crossing", "Muted chime");
+    expect(wrapper.find('[data-test="note"]').exists()).toBe(false);
     await wrapper.findAll('[role="group"] button')[1]!.trigger("click"); // Doors only
     await flushPromises();
     expect(wrapper.get('[role="toolbar"] [data-test="count"]').text()).toBe("1 selected");
+    expect(wrapper.get('[data-test="note"]').text()).toBe("2 selected sounds are hidden by the filters and were deselected.");
+  });
+
+  it("uses the singular, adds up further deselections, and forgets the note on the next pick", async () => {
+    const { wrapper } = await mountLibrary();
+    await enterSelection(wrapper, "Bell", "Léon's knock", "Zebra crossing");
+    await wrapper.findAll('[role="group"] button')[1]!.trigger("click"); // Doors: Zebra goes
+    await flushPromises();
+    expect(wrapper.get('[data-test="note"]').text()).toBe("1 selected sound is hidden by the filters and was deselected.");
+
+    await wrapper.get('[data-test="filter-tag"]').setValue("es"); // Bell only: Léon goes
+    await flushPromises();
+    expect(wrapper.get('[data-test="note"]').text()).toBe("2 selected sounds are hidden by the filters and were deselected.");
+
+    await wrapper.findAll("li")[0]!.get('[data-test="select"]').trigger("click");
+    expect(wrapper.find('[data-test="note"]').exists()).toBe(false);
+  });
+
+  it("does not count sounds that were deleted as hidden", async () => {
+    const { wrapper } = await mountLibrary();
+    await enterSelection(wrapper, "Bell", "Zebra crossing");
+    useStudio().sounds.value = library().filter((s) => s.id !== "s3");
+    await flushPromises();
+    expect(wrapper.get('[role="toolbar"] [data-test="count"]').text()).toBe("1 selected");
+    expect(wrapper.find('[data-test="note"]').exists()).toBe(false);
+  });
+
+  it("returns focus to the Select button when the bulk bar goes away", async () => {
+    const { wrapper } = await mountLibrary();
+    await enterSelection(wrapper, "Bell");
+    (wrapper.get('[data-test="done"]').element as HTMLElement).focus();
+    await wrapper.get('[data-test="done"]').trigger("click");
+    await flushPromises();
+    expect(document.activeElement).toBe(wrapper.get('[data-test="select-toggle"]').element);
+  });
+
+  it("also does so after Escape and after a confirmed delete", async () => {
+    const { wrapper } = await mountLibrary();
+    await enterSelection(wrapper, "Bell");
+    await wrapper.get('[data-test="library"]').trigger("keydown", { key: "Escape" });
+    await flushPromises();
+    expect(document.activeElement).toBe(wrapper.get('[data-test="select-toggle"]').element);
+
+    await enterSelection(wrapper, "Zebra crossing");
+    await wrapper.get('[data-test="action-delete"]').trigger("click");
+    await flushPromises();
+    useConfirm().answer(true);
+    await flushPromises();
+    expect(wrapper.find('[role="toolbar"]').exists()).toBe(false);
+    expect(document.activeElement).toBe(wrapper.get('[data-test="select-toggle"]').element);
+  });
+
+  it("leaves focus alone when it is somewhere the user put it", async () => {
+    const { wrapper } = await mountLibrary();
+    await enterSelection(wrapper, "Bell");
+    const search = wrapper.get('[data-test="search"]').element as HTMLInputElement;
+    search.focus();
+    await wrapper.get('[data-test="library"]').trigger("keydown", { key: "Escape" });
+    await flushPromises();
+    expect(document.activeElement).toBe(search);
   });
 
   it("leaves selection mode when the library becomes empty", async () => {
@@ -471,7 +551,11 @@ describe("selection", () => {
 });
 
 describe("bulk actions", () => {
-  const ids = (...list: string[]) => expect.arrayContaining(list);
+  // The ids go out in click order; the API does not care, so compare them sorted and exactly.
+  const lastBulk = () => {
+    const [body] = mocks.ui.sounds.bulk.mock.calls.at(-1)!;
+    return { ...body, ids: [...body.ids].sort() };
+  };
 
   async function bulk(wrapper: VueWrapper, action: string) {
     await wrapper.get(`[data-test="action-${action}"]`).trigger("click");
@@ -487,14 +571,14 @@ describe("bulk actions", () => {
     const { wrapper } = await mountLibrary();
     await enterSelection(wrapper, "Bell", "Muted chime");
     await bulk(wrapper, "enable");
-    expect(mocks.ui.sounds.bulk).toHaveBeenCalledWith({ ids: ids("s1", "s4"), set: { enabled: true } });
-    expect(mocks.ui.sounds.bulk.mock.calls[0]![0].ids).toHaveLength(2);
+    expect(lastBulk()).toEqual({ ids: ["s1", "s4"], set: { enabled: true } });
+    expect(mocks.ui.sounds.bulk).toHaveBeenCalledTimes(1);
     expect(toasts()).toEqual(["2 sounds updated"]);
     expect(mocks.ui.sounds.list).toHaveBeenCalledTimes(1);
     expect(mocks.ui.jobs).toHaveBeenCalledTimes(1);
 
     await bulk(wrapper, "disable");
-    expect(mocks.ui.sounds.bulk).toHaveBeenLastCalledWith({ ids: ids("s1", "s4"), set: { enabled: false } });
+    expect(lastBulk()).toEqual({ ids: ["s1", "s4"], set: { enabled: false } });
     // the selection survives so several changes can be chained
     expect(wrapper.get('[role="toolbar"] [data-test="count"]').text()).toBe("2 selected");
   });
@@ -515,7 +599,7 @@ describe("bulk actions", () => {
     expect(dialog(wrapper).get('[data-test="apply"]').attributes("disabled")).toBeDefined();
     await dialog(wrapper).get('[data-test="dialog-category"]').setValue("alerts");
     await apply(wrapper);
-    expect(mocks.ui.sounds.bulk).toHaveBeenCalledWith({ ids: ids("s1", "s3"), set: { category_id: "alerts" } });
+    expect(lastBulk()).toEqual({ ids: ["s1", "s3"], set: { category_id: "alerts" } });
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
     expect(toasts()).toEqual(["2 sounds updated"]);
   });
@@ -528,15 +612,15 @@ describe("bulk actions", () => {
     expect(dialog(wrapper).text()).toContain("Pick at least one season");
     await dialog(wrapper).findAll('[data-test="season"]')[1]!.trigger("click");
     await apply(wrapper);
-    expect(mocks.ui.sounds.bulk).toHaveBeenLastCalledWith({
-      ids: ids("s1", "s3"),
+    expect(lastBulk()).toEqual({
+      ids: ["s1", "s3"],
       set: { seasons: ["halloween"], all_seasons: false },
     });
 
     await bulk(wrapper, "seasons");
     await dialog(wrapper).get('[role="switch"]').trigger("click");
     await apply(wrapper);
-    expect(mocks.ui.sounds.bulk).toHaveBeenLastCalledWith({ ids: ids("s1", "s3"), set: { seasons: [], all_seasons: true } });
+    expect(lastBulk()).toEqual({ ids: ["s1", "s3"], set: { seasons: [], all_seasons: true } });
   });
 
   it("adds and removes tags in one go", async () => {
@@ -552,8 +636,8 @@ describe("bulk actions", () => {
     await editors[1]!.setValue("bath");
     await editors[1]!.trigger("keydown", { key: "Enter" });
     await apply(wrapper);
-    expect(mocks.ui.sounds.bulk).toHaveBeenCalledWith({
-      ids: ids("s1", "s3"),
+    expect(lastBulk()).toEqual({
+      ids: ["s1", "s3"],
       set: { add_tags: ["kids_room"], remove_tags: ["bath"] },
     });
   });
@@ -573,7 +657,7 @@ describe("bulk actions", () => {
     const remove = dialog(wrapper).findAll('[data-test="tag"] button').at(-1)!;
     await remove.trigger("click"); // un-remove "es"
     await apply(wrapper);
-    expect(mocks.ui.sounds.bulk).toHaveBeenCalledWith({ ids: ["s1"], set: { add_tags: ["es"] } });
+    expect(lastBulk()).toEqual({ ids: ["s1"], set: { add_tags: ["es"] } });
   });
 
   it("normalizes with a profile, or removes normalization with None", async () => {
@@ -586,13 +670,13 @@ describe("bulk actions", () => {
     expect(radios()).toHaveLength(3); // None, Standard, Soft
     await radios()[2]!.setValue(true);
     await apply(wrapper);
-    expect(mocks.ui.sounds.bulk).toHaveBeenLastCalledWith({ ids: ids("s1", "s3"), set: { profile_id: "soft" } });
+    expect(lastBulk()).toEqual({ ids: ["s1", "s3"], set: { profile_id: "soft" } });
     expect(toasts()).toEqual(["2 sounds queued"]);
 
     await bulk(wrapper, "normalize");
     await radios()[0]!.setValue(true);
     await apply(wrapper);
-    expect(mocks.ui.sounds.bulk).toHaveBeenLastCalledWith({ ids: ids("s1", "s3"), set: { profile_id: null } });
+    expect(lastBulk()).toEqual({ ids: ["s1", "s3"], set: { profile_id: null } });
   });
 
   it("deletes only after confirmation", async () => {
@@ -612,7 +696,8 @@ describe("bulk actions", () => {
     await flushPromises();
     confirm.answer(true);
     await flushPromises();
-    expect(mocks.ui.sounds.bulkDelete).toHaveBeenCalledWith(ids("s1", "s3"));
+    expect(mocks.ui.sounds.bulkDelete).toHaveBeenCalledTimes(1);
+    expect([...mocks.ui.sounds.bulkDelete.mock.calls[0]![0]].sort()).toEqual(["s1", "s3"]);
     expect(toasts()).toEqual(["2 sounds deleted"]);
     expect(mocks.ui.sounds.list).toHaveBeenCalled();
     expect(wrapper.find('[role="toolbar"]').exists()).toBe(false);

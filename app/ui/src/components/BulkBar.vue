@@ -18,7 +18,7 @@ export type BulkAction = "category" | "seasons" | "tags" | "normalize" | "enable
 
 // Fixed bar shown while selecting. `count` is how many sounds are selected, `total` how many the
 // current filters list ("Select all (filtered)"). The parent runs the actions.
-const props = defineProps<{ count: number; total: number; busy?: boolean; error?: string | null }>();
+const props = defineProps<{ count: number; total: number; busy?: boolean; error?: string | null; note?: string | null }>();
 const emit = defineEmits<{ action: [name: BulkAction]; "select-all": []; done: [] }>();
 
 const { t, tp } = useI18n();
@@ -73,6 +73,8 @@ function run(name: BulkAction): void {
           <Icon :path="mdiClose" :size="22" />
         </button>
       </div>
+
+      <p v-if="note" data-test="note" role="status" class="mt-1.5 text-xs text-muted">{{ note }}</p>
 
       <p
         v-if="error"

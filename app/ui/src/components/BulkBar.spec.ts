@@ -83,6 +83,14 @@ describe("BulkBar", () => {
     expect(mountBar({ count: 2 }).find('[role="alert"]').exists()).toBe(false);
   });
 
+  it("shows a polite note, e.g. when filters deselected sounds", () => {
+    const wrapper = mountBar({ count: 1, note: "1 selected sound is hidden by the filters and was deselected." });
+    const note = wrapper.get('[data-test="note"]');
+    expect(note.attributes("role")).toBe("status");
+    expect(note.text()).toBe("1 selected sound is hidden by the filters and was deselected.");
+    expect(mountBar({ count: 1 }).find('[data-test="note"]').exists()).toBe(false);
+  });
+
   it("localizes", () => {
     useI18n().setLocale("es");
     const wrapper = mountBar({ count: 3, total: 9 });

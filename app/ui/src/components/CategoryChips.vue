@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from "vue";
+import { onMounted, ref, watch } from "vue";
 import type { Category } from "@/api/types";
 import Icon from "@/components/Icon.vue";
 import { useI18n } from "@/i18n";
@@ -18,17 +18,14 @@ const emit = defineEmits<{ "update:modelValue": [value: string | null] }>();
 const { t } = useI18n();
 const group = ref<HTMLElement | null>(null);
 
-// A category restored from the URL may sit off screen in the scroller: bring it into view.
-watch(
-  () => props.modelValue,
-  async () => {
-    await nextTick();
-    group.value
-      ?.querySelector<HTMLElement>('[aria-pressed="true"]')
-      ?.scrollIntoView?.({ block: "nearest", inline: "center" });
-  },
-  { flush: "post" },
-);
+// A category restored from the URL (or picked elsewhere) may sit off screen in the scroller:
+// bring the active chip into view on mount and whenever the selection changes.
+function reveal(): void {
+  group.value?.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView?.({ block: "nearest", inline: "center" });
+}
+
+onMounted(reveal);
+watch(() => props.modelValue, reveal, { flush: "post" });
 </script>
 
 <template>

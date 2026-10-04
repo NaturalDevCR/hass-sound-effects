@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useId } from "vue";
+import { computed, useId } from "vue";
 import { mdiClose, mdiPlus } from "@mdi/js";
 import Icon from "@/components/Icon.vue";
 import { useI18n } from "@/i18n";
@@ -7,17 +7,22 @@ import { addTag, slugifyTag } from "@/lib/tags";
 
 // Generic tag list editor (v-model = the tags). Whatever is typed becomes a lowercase slug, the
 // same normalization the backend applies, so what you see is what gets stored. `suggestions` are
-// existing tags to pick from; the parent decides which ones to offer.
+// existing tags to pick from; the parent decides which ones to offer. `v-model:draft` (optional)
+// exposes the text typed but not yet turned into a chip, so a parent that submits right away can
+// include it instead of silently dropping it.
 const props = defineProps<{ modelValue: string[]; suggestions?: string[]; label?: string }>();
 const emit = defineEmits<{ "update:modelValue": [value: string[]] }>();
+const draft = defineModel<string>("draft", { default: "" });
 
 const { t } = useI18n();
 const inputId = useId();
-const draft = ref("");
+const hintId = useId();
 
 const MAX_SUGGESTIONS = 12;
 
 const pending = computed(() => slugifyTag(draft.value));
+// What Enter would add: shown while typing so the stored (slugified) form is no surprise.
+const preview = computed(() => (pending.value && !props.modelValue.includes(pending.value) ? pending.value : ""));
 const offered = computed(() =>
   (props.suggestions ?? [])
     .filter((tag) => !props.modelValue.includes(tag) && (!pending.value || tag.includes(pending.value)))
@@ -60,10 +65,13 @@ function remove(tag: string): void {
 
 function pick(tag: string): void {
   commit(addTag(props.modelValue, tag));
+  draft.value = ""; // the partial text was only a search for this suggestion
 }
 </script>
 
 <template>
+  <!-- Every button here swallows mousedown: that keeps focus in the field, so the blur that would
+       commit a half-typed tag never fires before a click on a suggestion, Add or a remove cross. -->
   <div>
     <label :for="inputId" class="mb-1.5 block text-sm font-medium">{{ label ?? t("picker.tags.label") }}</label>
     <div class="flex gap-2">
@@ -73,6 +81,7 @@ function pick(tag: string): void {
         type="text"
         class="field min-w-0 flex-1"
         :placeholder="t('picker.tags.placeholder')"
+        :aria-describedby="preview ? hintId : undefined"
         enterkeyhint="done"
         autocapitalize="none"
         autocomplete="off"
@@ -95,6 +104,10 @@ function pick(tag: string): void {
       </button>
     </div>
 
+    <p v-if="preview" :id="hintId" data-test="pending" class="mt-1.5 text-xs text-muted">
+      {{ t("picker.tags.pending", { tag: preview }) }}
+    </p>
+
     <ul v-if="modelValue.length" class="mt-2 flex flex-wrap gap-2">
       <li
         v-for="tag in modelValue"
@@ -108,6 +121,7 @@ function pick(tag: string): void {
           type="button"
           class="-my-1 -mr-1.5 grid size-11 shrink-0 place-items-center rounded-full text-muted hover:text-ink"
           :aria-label="t('picker.tags.remove', { tag })"
+          @mousedown.prevent
           @click="remove(tag)"
         >
           <Icon :path="mdiClose" :size="16" />
@@ -124,6 +138,7 @@ function pick(tag: string): void {
           data-test="suggestion"
           type="button"
           class="chip"
+          @mousedown.prevent
           @click="pick(tag)"
         >
           <Icon :path="mdiPlus" :size="16" />

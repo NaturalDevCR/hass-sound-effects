@@ -40,6 +40,15 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Text for anything a request can throw, for inline errors: the API's `detail` for an
+ * {@link ApiError}, the message of any other Error, otherwise the value as a string.
+ */
+export function messageOf(cause: unknown): string {
+  if (cause instanceof ApiError) return cause.detail;
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 type ApiInit = RequestInit & { json?: unknown };
 
 /** Location prefixes FastAPI adds that say nothing about which field is wrong. */

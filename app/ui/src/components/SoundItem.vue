@@ -153,7 +153,6 @@ onBeforeUnmount(() => {
             : 'border-line bg-raised text-ink enabled:hover:bg-hover'
         "
         :disabled="!canPlay"
-        :aria-pressed="playing"
         :aria-label="t(playing ? 'library.item.stop' : 'library.item.play', { title: sound.title })"
         @click="emit('toggle-play', sound.id)"
       >

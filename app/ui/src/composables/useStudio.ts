@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { ApiError, ui } from "@/api/client";
+import { messageOf, ui } from "@/api/client";
 import type { Category, Profile, Season, Sound, State } from "@/api/types";
 
 // Module-level singleton: every component sees the same lists, and a refresh
@@ -19,11 +19,6 @@ const error = ref<string | null>(null);
 const categoryIndex = computed(() => new Map(categories.value.map((c) => [c.id, c])));
 const seasonIndex = computed(() => new Map(seasons.value.map((s) => [s.id, s])));
 const profileIndex = computed(() => new Map(profiles.value.map((p) => [p.id, p])));
-
-function messageOf(cause: unknown): string {
-  if (cause instanceof ApiError) return cause.detail;
-  return cause instanceof Error ? cause.message : String(cause);
-}
 
 let inflight: Promise<void> | null = null;
 
