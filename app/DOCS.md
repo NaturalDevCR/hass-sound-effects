@@ -9,7 +9,7 @@ Sound Effects Studio is a Home Assistant panel for importing, organizing, editin
 3. Upload audio files, or import them from the folders available in the App's import screen.
 4. Install the **Sound Effects** integration through HACS. It discovers this App automatically and loads its catalog.
 
-If discovery does not configure the integration, add it manually. Use the App hostname shown in the integration documentation as the host, port `8099`, and copy the token from **System → Connection** in the App.
+If discovery does not configure the integration, add it manually. Use the App hostname shown in **System → Connection** in the App (also listed on the App's page in Home Assistant) as the host, port `8099`, and copy the token from **System → Connection** in the App.
 
 ## Normalization profiles
 
@@ -34,7 +34,7 @@ The Home Assistant App backup includes Sound Effects Studio's database, uploads 
 ## Troubleshooting
 
 - If the panel does not load, check the App log and confirm the App is running.
-- If the integration cannot connect, confirm it uses the App hostname, port `8099`, and the current token shown in **System → Connection**.
+- If the integration cannot connect, confirm it uses the App hostname shown in **System → Connection**, port `8099`, and the current token shown in **System → Connection**.
 - If sounds appear in the catalog but do not play, check the `/local` status banner and restart Home Assistant if `www` was created after startup.
 - If an import is missing, check that its source folder is available to the App and that the audio format is supported.
 

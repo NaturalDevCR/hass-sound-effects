@@ -152,6 +152,7 @@ def test_lifespan_publishes_discovery_and_replaces_the_previous_one(
     with TestClient(app):
         assert wait_for(lambda: discovery_status(app) == "ok")
         assert app.state.discovery_status == {"status": "ok", "message": None}
+        assert app.state.hostname == HOSTNAME
     calls = fake.calls()
     assert calls.index(("DELETE", "/discovery/uuid-old")) < calls.index(("POST", "/discovery"))
     assert fake.body("POST", "/discovery") == {

@@ -64,6 +64,7 @@ async def get_state(request: Request) -> dict[str, object]:
             "created_by_app": www.created_by_app,
         },
         "media_base_url_effective": state.media_base_url_effective,
+        "hostname": state.hostname,
         "storage": await asyncio.to_thread(state.publisher.storage_usage),
         "settings": state.repo.get_settings(),
     }

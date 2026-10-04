@@ -85,6 +85,7 @@ def create_app(
             "message": None if state.supervisor.available else _NO_SUPERVISOR,
         }
         state.media_base_url_effective = ""
+        state.hostname = None
         _install_error_handlers(app)
         app.include_router(api_v1.router)
         _include_optional_routers(app)

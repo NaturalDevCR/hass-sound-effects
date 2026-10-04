@@ -146,6 +146,7 @@ async def publish_discovery(app: FastAPI) -> None:
             hostname = (await supervisor.self_info()).get("hostname")
             if not isinstance(hostname, str) or not hostname:
                 raise SupervisorError("The Supervisor did not report the App hostname")
+            state.hostname = hostname
             stale = await _delete_previous_discoveries(supervisor, uuid_file)
             uuid = await supervisor.publish_discovery(
                 {

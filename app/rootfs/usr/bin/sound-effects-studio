@@ -1,3 +1,3 @@
-#!/bin/sh
-# Started by the base image's s6 init; SUPERVISOR_TOKEN comes from the container env.
+#!/usr/bin/with-contenv bashio
+# with-contenv exposes the container environment (SUPERVISOR_TOKEN) under s6-overlay.
 exec python3 -m sound_effects_studio.main

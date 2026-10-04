@@ -58,6 +58,7 @@ def test_state_and_token(ingress: TestClient, app: FastAPI):
         "discovery": app.state.discovery_status,
         "www": {"exists": True, "served": None, "created_by_app": False},
         "media_base_url_effective": "",
+        "hostname": None,
         "storage": app.state.publisher.storage_usage(),
         "settings": app.state.repo.get_settings().model_dump(),
     }
