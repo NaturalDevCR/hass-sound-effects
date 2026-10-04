@@ -62,7 +62,7 @@ function toggleAll(): void {
         :key="season.id"
         data-test="season"
         type="button"
-        class="chip"
+        class="chip max-w-full whitespace-normal! text-left"
         :disabled="modelValue.all_seasons"
         :aria-pressed="modelValue.seasons.includes(season.id)"
         :style="
@@ -79,7 +79,7 @@ function toggleAll(): void {
         <span class="inline-flex" :style="{ color: season.color }">
           <Icon :path="resolveIcon(season.icon)" :size="16" />
         </span>
-        {{ season.name }}
+        <span class="min-w-0 break-words">{{ season.name }}</span>
         <Icon v-if="modelValue.seasons.includes(season.id)" :path="mdiCheck" :size="16" />
       </button>
     </div>

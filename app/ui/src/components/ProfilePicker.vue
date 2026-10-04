@@ -62,8 +62,10 @@ const options = computed<Option[]>(() => {
       >
         <span class="size-2.5 scale-0 rounded-full bg-accent transition-transform group-has-checked:scale-100" />
       </span>
-      <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ option.title }}</span>
-      <span class="shrink-0 text-sm text-muted tabular-nums">{{ option.hint }}</span>
+      <span class="min-w-0 flex-1">
+        <span class="block text-sm font-medium break-words">{{ option.title }}</span>
+        <span class="mt-0.5 block text-xs text-muted tabular-nums break-words">{{ option.hint }}</span>
+      </span>
     </label>
     <p v-if="!profiles.length" class="px-1 text-sm text-muted">{{ t("picker.profile.empty") }}</p>
   </div>

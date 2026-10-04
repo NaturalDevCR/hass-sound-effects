@@ -104,7 +104,7 @@ function pick(tag: string): void {
       </button>
     </div>
 
-    <p v-if="preview" :id="hintId" data-test="pending" class="mt-1.5 text-xs text-muted">
+    <p v-if="preview" :id="hintId" data-test="pending" class="mt-1.5 text-xs break-words text-muted">
       {{ t("picker.tags.pending", { tag: preview }) }}
     </p>
 
@@ -137,12 +137,12 @@ function pick(tag: string): void {
           :key="tag"
           data-test="suggestion"
           type="button"
-          class="chip"
+          class="chip max-w-full"
           @mousedown.prevent
           @click="pick(tag)"
         >
           <Icon :path="mdiPlus" :size="16" />
-          {{ tag }}
+          <span class="min-w-0 truncate">{{ tag }}</span>
         </button>
       </div>
     </div>
