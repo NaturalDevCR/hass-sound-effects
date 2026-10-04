@@ -267,6 +267,10 @@ class SoundEffectsManager:
         for update in tuple(self._listeners):
             update()
 
+    def bag_sizes(self) -> dict[str, int]:
+        """Return bag keys and remaining counts without exposing sound history."""
+        return {key: len(bag.remaining) for key, bag in self._bags.items()}
+
     @callback
     def _history_data(self) -> dict[str, Any]:
         return {

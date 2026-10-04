@@ -110,5 +110,25 @@
     "not_loaded": {
       "message": "Sound Effects is not loaded. Set up the integration before using this action."
     }
+  },
+  "entity": {
+    "sensor": {
+      "active_season": {
+        "name": "Active season"
+      }
+    },
+    "select": {
+      "season_override": {
+        "name": "Season override",
+        "state": {
+          "Auto": "Auto"
+        }
+      }
+    },
+    "binary_sensor": {
+      "connected": {
+        "name": "Connected"
+      }
+    }
   }
 }

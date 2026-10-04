@@ -20,7 +20,7 @@ from .coordinator import SoundEffectsCoordinator
 from .manager import SoundEffectsManager
 from .services import async_register_services
 
-PLATFORMS: list[Platform] = []
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SELECT, Platform.BINARY_SENSOR]
 # HA's schema factory leaves its dictionary parameters untyped.
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
 
