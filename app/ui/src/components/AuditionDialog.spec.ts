@@ -42,6 +42,7 @@ it("lists target details, sends preview selection and shows returned URL", async
   } as any;
   audition.mockResolvedValue({ ok: true, url: "http://ha/local/roar.mp3" });
   open(true);
+  expect(wrapper.get('input[type="radio"]').attributes("name")).toBeTruthy();
   expect(wrapper.text()).toContain("media_player.bar");
   expect(wrapper.text()).toContain("40%");
   await wrapper.get('[data-test="use-preview"]').setValue(true);

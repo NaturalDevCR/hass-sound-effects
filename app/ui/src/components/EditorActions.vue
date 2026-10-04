@@ -10,10 +10,12 @@ defineProps<{
   previewPending: boolean;
   previewReady: boolean;
   previewAvailable: boolean;
+  previewPlaying: boolean;
+  previewHint: boolean;
   error: string | null;
   busy: boolean;
 }>();
-const emit = defineEmits<{ preview: []; audition: []; save: []; revert: []; remove: [] }>();
+const emit = defineEmits<{ preview: []; playPreview: []; audition: []; save: []; revert: []; remove: [] }>();
 const { t } = useI18n();
 </script>
 <template>
@@ -27,6 +29,10 @@ const { t } = useI18n();
     >
       {{ t(previewAvailable ? "editor.previewReady" : "editor.previewStale") }}
     </p>
+    <button v-if="previewReady" data-test="play-preview" class="btn min-h-11! w-full" @click="emit('playPreview')">
+      {{ t(previewPlaying ? "editor.stopPreview" : "editor.playPreview") }}
+    </button>
+    <p v-if="previewReady && previewHint" class="text-xs text-muted">{{ t("editor.previewPlayHint") }}</p>
     <p v-if="busy" class="text-xs text-muted">{{ t("editor.busy") }}</p>
     <div class="grid grid-cols-2 gap-2">
       <button

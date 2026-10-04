@@ -228,3 +228,18 @@ describe("useJobs polling", () => {
     jobs.stop();
   });
 });
+
+it("leaves editor preview failures inline without duplicate or summary toasts", async () => {
+  const { jobs, toast } = await load();
+  mocks.ui.jobs.mockResolvedValueOnce([]);
+  await jobs.refresh();
+  const release = jobs.suppressPreviewToast("s1");
+  mocks.ui.jobs.mockResolvedValue([job({ id: "preview-inline", kind: "preview", status: "failed", error: "bad render" })]);
+  await jobs.refresh();
+  expect(toast.toasts.value).toHaveLength(0);
+  expect(mocks.refreshSounds).toHaveBeenCalledOnce();
+  release();
+  mocks.ui.jobs.mockResolvedValue([job({ id: "preview-external", kind: "preview", status: "failed", error: "external failure" })]);
+  await jobs.refresh();
+  expect(toast.toasts.value[0]?.message).toContain("external failure");
+});

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, toRef, useId } from "vue";
+import { computed, onBeforeUnmount, onMounted, toRef } from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import { mdiWaveform } from "@mdi/js";
 import Sheet from "@/components/Sheet.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import StatusPill from "@/components/StatusPill.vue";
+import TrimInputs from "@/components/TrimInputs.vue";
 import WaveformEditor from "@/components/WaveformEditor.vue";
 import TransportBar from "@/components/TransportBar.vue";
 import LevelControls from "@/components/LevelControls.vue";
@@ -15,13 +16,11 @@ import AuditionDialog from "@/components/AuditionDialog.vue";
 import { useSoundEditor } from "@/composables/useSoundEditor";
 import { useConfirm } from "@/composables/useConfirm";
 import { useI18n } from "@/i18n";
-import { messageOf } from "@/api/client";
 import { clipLength } from "@/lib/recipe";
 const props = defineProps<{ id: string }>();
 const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
-const inputId = useId();
 const editor = useSoundEditor(toRef(props, "id"));
 const {
   sound,
@@ -44,6 +43,9 @@ const {
   previewPending,
   previewReady,
   previewAvailable,
+  previewPlaying,
+  previewHint,
+  previewError,
   auditionOpen,
   loaded,
 } = editor;
@@ -53,13 +55,11 @@ const {
   activated,
   error: audioError,
   buffer,
-  position,
   playing,
   loop,
   bypass,
 } = editor.audio;
 const length = computed(() => (bypass.value ? duration.value : clipLength(recipe.value, duration.value)));
-const end = computed(() => recipe.value.trim_end ?? duration.value);
 onBeforeRouteLeave(() => editor.guard());
 onBeforeRouteUpdate((to, from) => (to.params.id !== from.params.id ? editor.guard() : true));
 async function close() {
@@ -72,13 +72,6 @@ function trim(start: number, finish: number) {
     trim_start: Number(start.toFixed(2)),
     trim_end: Math.abs(finish - duration.value) < 0.005 ? null : Number(finish.toFixed(2)),
   });
-}
-function nudge(event: KeyboardEvent, side: "start" | "end") {
-  if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
-  event.preventDefault();
-  const step = (event.shiftKey ? 0.1 : 0.01) * (["ArrowUp", "ArrowRight"].includes(event.key) ? 1 : -1);
-  if (side === "start") trim(Number((recipe.value.trim_start + step).toFixed(2)), end.value);
-  else trim(recipe.value.trim_start, Number((end.value + step).toFixed(2)));
 }
 function shortcut(event: KeyboardEvent) {
   if (
@@ -95,8 +88,8 @@ function shortcut(event: KeyboardEvent) {
   const target = event.target;
   if (
     target instanceof HTMLElement &&
-    (target.closest('input,textarea,select,[contenteditable="true"]') ||
-      (event.key === " " && target.closest("button,a")))
+    (target.closest('textarea,select,[contenteditable]:not([contenteditable="false"])') ||
+      (target instanceof HTMLInputElement && ["text", "number", "search", "email", "password", "tel", "url"].includes(target.type)))
   )
     return;
   if (event.key === " ") {
@@ -146,51 +139,19 @@ onBeforeUnmount(() => document.removeEventListener("keydown", shortcut));
           :peaks="peaks"
           :duration="duration"
           :recipe="recipe"
-          :position="position"
+          :position="editor.audio.position"
           @trim="trim"
           @seek="editor.audio.seek"
-          @error="audioError = messageOf($event)"
+          @error="audioError = t('editor.decodeError')"
         />
         <div v-else class="grid h-24 place-items-center rounded-lg bg-ground md:h-30" :aria-busy="loading">
-          <p v-if="loading" class="animate-pulse text-sm text-muted">{{ t("editor.loadingAudio") }}</p>
+          <p v-if="!sound.original" class="text-sm text-muted">{{ t("editor.waveformProcessing") }}</p>
+          <p v-else-if="loading" class="animate-pulse text-sm text-muted">{{ t("editor.loadingAudio") }}</p>
           <button v-else-if="!activated" class="btn min-h-11!" @click="editor.audio.decode">
             {{ t("editor.loadAudio") }}
           </button>
         </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label :for="`${inputId}-start`" class="mb-1 block text-xs text-muted">{{
-              t("editor.start")
-            }}</label
-            ><input
-              :id="`${inputId}-start`"
-              data-test="trim-start"
-              type="number"
-              min="0"
-              :max="end"
-              step="0.01"
-              :value="recipe.trim_start"
-              class="field tabular-nums"
-              @input="trim(Number(($event.target as HTMLInputElement).value), end)"
-              @keydown="nudge($event, 'start')"
-            />
-          </div>
-          <div>
-            <label :for="`${inputId}-end`" class="mb-1 block text-xs text-muted">{{ t("editor.end") }}</label
-            ><input
-              :id="`${inputId}-end`"
-              data-test="trim-end"
-              type="number"
-              :min="recipe.trim_start"
-              :max="duration"
-              step="0.01"
-              :value="end"
-              class="field tabular-nums"
-              @input="trim(recipe.trim_start, Number(($event.target as HTMLInputElement).value))"
-              @keydown="nudge($event, 'end')"
-            />
-          </div>
-        </div>
+        <TrimInputs :recipe="recipe" :duration="duration" :disabled="!sound.original" @trim="trim" />
         <ul v-if="problems.length" role="alert" class="space-y-1 text-sm text-danger">
           <li v-for="problem in problems" :key="problem">{{ t(problem) }}</li>
         </ul>
@@ -199,8 +160,9 @@ onBeforeUnmount(() => document.removeEventListener("keydown", shortcut));
         :playing="playing"
         :loop="loop"
         :bypass="bypass"
-        :position="position"
+        :position="editor.audio.position"
         :length="length"
+        :trim-start="recipe.trim_start"
         :disabled="!buffer || (!bypass && !valid)"
         @play="editor.audio.toggle"
         @loop="loop = !loop"
@@ -231,9 +193,12 @@ onBeforeUnmount(() => document.removeEventListener("keydown", shortcut));
         :preview-pending="previewPending"
         :preview-ready="previewReady"
         :preview-available="previewAvailable"
-        :error="error"
+        :error="previewError ?? error"
+        :preview-playing="previewPlaying"
+        :preview-hint="previewHint"
         :busy="busy"
         @preview="editor.preview"
+        @play-preview="editor.togglePreview"
         @audition="auditionOpen = true"
         @save="editor.save"
         @revert="editor.revert"

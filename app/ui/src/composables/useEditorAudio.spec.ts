@@ -4,6 +4,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useEditorAudio } from "./useEditorAudio";
 import { IDENTITY } from "@/lib/recipe";
 const engine = vi.hoisted(() => ({
+  clearCache: vi.fn(),
+  suspend: vi.fn().mockResolvedValue(undefined),
+  setLoop: vi.fn(),
   load: vi.fn(),
   play: vi.fn(),
   stop: vi.fn(),
@@ -116,4 +119,23 @@ it("stops live playback for invalid trim and lets bypass play the original", asy
   audio.bypass.value = false;
   await flushPromises();
   expect(audio.playing.value).toBe(false);
+});
+
+it("evicts buffers on sound changes/unmount and suspends the context", async () => {
+  const { audio, id } = await open();
+  id.value = "door";
+  await flushPromises();
+  expect(engine.clearCache).toHaveBeenCalledOnce();
+  wrapper.unmount();
+  expect(audio.buffer.value).toBeUndefined();
+  expect(engine.suspend).toHaveBeenCalledOnce();
+});
+it("toggles looping during playback without debouncing or restarting", async () => {
+  const { audio } = await open();
+  audio.play();
+  audio.loop.value = true;
+  await flushPromises();
+  expect(engine.setLoop).toHaveBeenCalledWith(true);
+  await vi.advanceTimersByTimeAsync(80);
+  expect(engine.play).toHaveBeenCalledOnce();
 });

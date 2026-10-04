@@ -1,12 +1,12 @@
 import { computed, onBeforeUnmount, ref, watch, type Ref } from "vue";
-import { audioUrl, messageOf, ui } from "@/api/client";
+import { messageOf, ui } from "@/api/client";
 import type { Recipe, Sound } from "@/api/types";
 import { useI18n } from "@/i18n";
-import { clampRecipe, clipLength, IDENTITY, recipesEqual, validateRecipe } from "@/lib/recipe";
+import { clampRecipe, IDENTITY, recipesEqual, validateRecipe } from "@/lib/recipe";
 import { addTag } from "@/lib/tags";
 import { useConfirm } from "./useConfirm";
 import { useJobs } from "./useJobs";
-import { usePlayer } from "./usePlayer";
+import { useEditorPreview } from "./useEditorPreview";
 import { useStudio } from "./useStudio";
 import { useToast } from "./useToast";
 import { useEditorAudio } from "./useEditorAudio";
@@ -54,14 +54,16 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
     () => !equalDetails(effectiveDetails.value, savedDetails.value) || !!tagDraft.value.trim(),
   );
   const dirty = computed(() => recipeDirty.value || detailsDirty.value);
-  const duration = computed(() => audio.duration.value || sound.value?.original?.duration || 0);
-  const problems = computed(() => validateRecipe(recipe.value, duration.value));
-  const valid = computed(() => problems.value.length === 0);
+  const valid = computed(() => problems.value.length === 0 && !!sound.value?.original);
   const audio = useEditorAudio(
     id,
     recipe,
     valid,
     computed(() => !!sound.value?.original),
+  );
+  const duration = computed(() => audio.duration.value || sound.value?.original?.duration || 0);
+  const problems = computed(() =>
+    sound.value?.original ? validateRecipe(recipe.value, duration.value) : [],
   );
   const busy = computed(() => sound.value?.status === "rendering" || sound.value?.status === "processing");
   const saving = ref(false);
@@ -84,14 +86,11 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
       !detailsSaving.value &&
       !deleting.value,
   );
-  const previewPending = ref(false);
-  const previewJob = ref<string | null>(null);
-  const previewReady = ref(false);
-  const previewRecipe = ref<Recipe | null>(null);
+  const previews = useEditorPreview(id, recipe, audio.stop);
+  watch(audio.playing, (playing) => {
+    if (playing) previews.stopPreview();
+  });
   const auditionOpen = ref(false);
-  const previewAvailable = computed(
-    () => previewReady.value && !!previewRecipe.value && recipesEqual(recipe.value, previewRecipe.value),
-  );
   let initializedId = "";
   let disposed = false;
   let deleted = false;
@@ -105,10 +104,6 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
         recipe.value = { ...next.recipe };
         details.value = detailsOf(next);
         tagDraft.value = "";
-        previewReady.value = next.has_preview;
-        previewRecipe.value = next.has_preview ? { ...next.recipe } : null;
-        previewJob.value = null;
-        previewPending.value = false;
         error.value = null;
         detailsError.value = null;
       } else {
@@ -125,8 +120,12 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
   }
   function patchRecipe(patch: Partial<Recipe>) {
     const next = clampRecipe({ ...recipe.value, ...patch }, duration.value);
-    const max = Math.min(5, clipLength(next, duration.value) / 2);
-    recipe.value = { ...next, fade_in: Math.min(next.fade_in, max), fade_out: Math.min(next.fade_out, max) };
+    // Trim edits retain the author's fades; validateRecipe reports an oversized envelope.
+    recipe.value = {
+      ...next,
+      fade_in: patch.fade_in ?? recipe.value.fade_in,
+      fade_out: patch.fade_out ?? recipe.value.fade_out,
+    };
   }
   async function save() {
     if (!canSave.value) return;
@@ -175,39 +174,10 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
       detailsSaving.value = false;
     }
   }
-  async function preview() {
-    if (!valid.value || previewPending.value || deleting.value) return;
-    previewPending.value = true;
-    previewReady.value = false;
-    error.value = null;
-    const snapshot = { ...recipe.value };
-    const soundId = id.value;
-    try {
-      const result = await ui.sounds.preview(soundId, snapshot);
-      if (disposed || id.value !== soundId) return;
-      previewRecipe.value = snapshot;
-      previewJob.value = result.job.id;
-      await jobs.refresh();
-    } catch (cause) {
-      error.value = messageOf(cause);
-      previewPending.value = false;
-    }
+  function preview() {
+    if (!valid.value || deleting.value) return;
+    return previews.preview();
   }
-  watch(jobs.jobs, (list) => {
-    const job = list.find((j) => j.id === previewJob.value);
-    if (!job || !["done", "failed"].includes(job.status)) return;
-    previewJob.value = null;
-    previewPending.value = false;
-    if (job.status === "failed") {
-      error.value = job.error ?? t("error.unknown");
-      return;
-    }
-    previewReady.value = true;
-    if (previewAvailable.value) {
-      audio.stop();
-      usePlayer().toggle(`${id.value}:preview`, audioUrl(id.value, "preview", Date.now()));
-    }
-  });
   function guard(): Promise<boolean> {
     if (deleted || !dirty.value) return Promise.resolve(true);
     confirmInFlight ??= useConfirm()
@@ -282,9 +252,7 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
     detailsError,
     detailsValid,
     canSave,
-    previewPending,
-    previewReady,
-    previewAvailable,
+    ...previews,
     auditionOpen,
     patchRecipe,
     save,

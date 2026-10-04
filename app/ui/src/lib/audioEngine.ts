@@ -14,10 +14,14 @@ export function gainSchedule(s: PreviewSettings): GainPoint[] {
   if (s.bypass) return [{ time: 0, value: 1 }];
   const gain = 10 ** (s.gainDb / 20);
   const length = Math.max(0, s.trimEnd - s.trimStart);
-  const points = [{ time: 0, value: s.fadeIn > 0 ? 0 : gain }];
-  if (s.fadeIn > 0) points.push({ time: s.fadeIn, value: gain });
-  if (s.fadeOut > 0) {
-    points.push({ time: length - s.fadeOut, value: gain }, { time: length, value: 0 });
+  const sum = Math.max(0, s.fadeIn) + Math.max(0, s.fadeOut);
+  const scale = sum > length ? length / sum : 1;
+  const fadeIn = Math.max(0, s.fadeIn) * scale;
+  const fadeOut = Math.max(0, s.fadeOut) * scale;
+  const points = [{ time: 0, value: fadeIn > 0 ? 0 : gain }];
+  if (fadeIn > 0) points.push({ time: fadeIn, value: gain });
+  if (fadeOut > 0) {
+    points.push({ time: length - fadeOut, value: gain }, { time: length, value: 0 });
   }
   return points;
 }
@@ -32,12 +36,19 @@ export class AudioEngine {
   private startedAt = 0;
   private offset = 0;
   private end = 0;
+  private start = 0;
+  private level = 1;
+  private lifecycle = 0;
   onEnded?: () => void;
   onError?: (cause: unknown) => void;
   constructor(ctx?: AudioContext) {
     this.ctx = ctx;
   }
   private context(): AudioContext {
+    const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+    if (session) {
+      try { session.type = "playback"; } catch { /* Some browsers expose a read-only session. */ }
+    }
     if (!this.ctx) {
       const Audio =
         globalThis.AudioContext ??
@@ -50,7 +61,11 @@ export class AudioEngine {
   }
   load(url: string): Promise<AudioBuffer> {
     const cached = this.cache.get(url);
-    if (cached) return cached;
+    if (cached) {
+      this.cache.delete(url);
+      this.cache.set(url, cached);
+      return cached;
+    }
     // Allocate synchronously in the gesture, before awaiting the network.
     const ctx = this.context();
     const result = (async () => {
@@ -59,17 +74,34 @@ export class AudioEngine {
         throw new ApiError(response.status, translate("error.http", { status: response.status }));
       return ctx.decodeAudioData(await response.arrayBuffer());
     })().catch((cause) => {
-      this.cache.delete(url);
+      if (this.cache.get(url) === result) this.cache.delete(url);
       throw cause;
     });
     this.cache.set(url, result);
+    while (this.cache.size > 2) this.cache.delete(this.cache.keys().next().value!);
     return result;
   }
+  /** At most two URL entries (including pending decodes), touched on every load.
+   * Clearing drops pending promises too; late resolutions never repopulate the cache. */
+  clearCache(): void {
+    this.cache.clear();
+  }
+  async suspend(): Promise<void> {
+    const ticket = ++this.lifecycle;
+    this.stop();
+    this.clearCache();
+    if (!this.ctx) return;
+    // Let the stop ramp finish; a new play cancels this pending suspension.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    if (ticket === this.lifecycle) await this.ctx.suspend();
+  }
   play(buffer: AudioBuffer, settings: PreviewSettings, opts: { loop?: boolean; from?: number } = {}): void {
+    const ticket = ++this.lifecycle;
     this.stop();
     const ctx = this.context();
-    if (ctx.state === "suspended")
+    if (["suspended", "interrupted"].includes(ctx.state))
       void ctx.resume().catch((cause) => {
+        if (ticket !== this.lifecycle) return;
         this.stop();
         this.onError?.(cause);
       });
@@ -84,7 +116,7 @@ export class AudioEngine {
     gain.connect(ctx.destination);
     const now = ctx.currentTime;
     const elapsed = offset - start;
-    const points = gainSchedule(settings);
+    const points = gainSchedule({ ...settings, trimStart: start, trimEnd: end });
     // Interpolate the envelope at a seek/restart, then schedule only remaining points.
     let value = points[0]!.value;
     for (let i = 1; i < points.length; i++) {
@@ -106,35 +138,62 @@ export class AudioEngine {
     this.gain = gain;
     this.offset = offset;
     this.end = end;
+    this.start = start;
+    this.level = settings.bypass ? 1 : 10 ** (settings.gainDb / 20);
+    source.loop = opts.loop ?? false;
+    source.loopStart = start;
+    source.loopEnd = end;
+    // Loop fades apply to the first pass only; restore steady gain at its boundary.
+    if (source.loop) gain.gain.setValueAtTime(this.level, now + end - offset);
     this.startedAt = now;
     source.onended = () => {
-      if (this.source !== source) return;
       source.onended = null;
       source.disconnect();
       gain.disconnect();
+      if (this.source !== source) return;
       this.source = undefined;
       this.gain = undefined;
       this.offset = end;
-      if (opts.loop) this.play(buffer, settings, { loop: true });
-      else this.onEnded?.();
+      this.onEnded?.();
     };
-    source.start(now, offset, end - offset);
+    source.start(now, offset);
+    if (!source.loop) source.stop(now + end - offset);
+  }
+  setLoop(loop: boolean): void {
+    if (!this.source || !this.ctx || this.source.loop === loop) return;
+    const now = this.ctx.currentTime;
+    this.offset = this.position;
+    this.startedAt = now;
+    this.source.loop = loop;
+    // A later stop() replaces the existing scheduled stop (Web Audio contract).
+    this.source.stop(loop ? now + 1e9 : now + this.end - this.offset);
+    this.gain!.gain.cancelScheduledValues(now);
+    this.gain!.gain.setValueAtTime(this.level, now);
   }
   stop(): void {
     this.offset = this.position;
-    if (this.source) {
-      this.source.onended = null;
-      this.source.stop();
-      this.source.disconnect();
-      this.gain?.disconnect();
+    const source = this.source;
+    const gain = this.gain;
+    if (source && gain && this.ctx) {
+      const now = this.ctx.currentTime;
+      if (gain.gain.cancelAndHoldAtTime) gain.gain.cancelAndHoldAtTime(now);
+      else {
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(gain.gain.value, now);
+      }
+      gain.gain.linearRampToValueAtTime(0, now + 0.01);
+      source.stop(now + 0.01);
+      // onended disconnects the retired nodes after the ramp, without ending a new source.
     }
     this.source = undefined;
     this.gain = undefined;
   }
   get position(): number {
-    return this.source && this.ctx
-      ? Math.min(this.end, this.offset + this.ctx.currentTime - this.startedAt)
-      : this.offset;
+    if (!this.source || !this.ctx) return this.offset;
+    const position = this.offset + this.ctx.currentTime - this.startedAt;
+    return this.source.loop
+      ? this.start + ((position - this.start) % (this.end - this.start))
+      : Math.min(this.end, position);
   }
   get playing(): boolean {
     return this.source !== undefined;

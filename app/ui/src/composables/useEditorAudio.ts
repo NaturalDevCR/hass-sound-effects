@@ -1,7 +1,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from "vue";
-import { audioUrl, messageOf } from "@/api/client";
+import { audioUrl } from "@/api/client";
 import type { Recipe } from "@/api/types";
 import { audioEngine as engine } from "@/lib/audioEngine";
+import { translate } from "@/i18n";
 import { computePeaks } from "@/lib/peaks";
 import { usePlayer } from "./usePlayer";
 
@@ -46,7 +47,7 @@ export function useEditorAudio(
         Math.min(1800, decoded.length || 1800),
       );
     } catch (cause) {
-      if (ticket === generation && !disposed) error.value = messageOf(cause);
+      if (ticket === generation && !disposed) error.value = translate("editor.decodeError");
     } finally {
       if (ticket === generation) loading.value = false;
     }
@@ -79,7 +80,7 @@ export function useEditorAudio(
       animate();
     } catch (cause) {
       stop();
-      error.value = messageOf(cause);
+      error.value = translate("editor.decodeError");
     }
   }
   function toggle() {
@@ -106,7 +107,6 @@ export function useEditorAudio(
       recipe.value.fade_in,
       recipe.value.fade_out,
       bypass.value,
-      loop.value,
     ],
     () => {
       if (!playing.value) return;
@@ -122,10 +122,12 @@ export function useEditorAudio(
       }, 80);
     },
   );
+  watch(loop, (next) => engine.setLoop(next));
   watch(id, () => {
     generation++;
     stop();
     usePlayer().stop();
+    engine.clearCache();
     buffer.value = undefined;
     peaks.value = [];
     position.value = 0;
@@ -147,7 +149,7 @@ export function useEditorAudio(
     };
     engine.onError = (cause) => {
       stop();
-      error.value = messageOf(cause);
+      error.value = translate("editor.decodeError");
     };
     document.addEventListener("pointerdown", activate);
     document.addEventListener("keydown", activate);
@@ -158,6 +160,9 @@ export function useEditorAudio(
     generation++;
     stop();
     usePlayer().stop();
+    buffer.value = undefined;
+    peaks.value = [];
+    void engine.suspend().catch(() => {});
     engine.onEnded = undefined;
     engine.onError = undefined;
     document.removeEventListener("pointerdown", activate);

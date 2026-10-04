@@ -19,6 +19,16 @@ let inflight: Promise<void> | null = null;
 /** Finished job ids we already reacted to. Filled silently on the first load so history is not replayed. */
 const handled = new Set<string>();
 let primed = false;
+const inlinePreviews = new Map<string, number>();
+/** The editor owns preview failures inline, including jobs finishing before the POST returns. */
+function suppressPreviewToast(soundId: string): () => void {
+  inlinePreviews.set(soundId, (inlinePreviews.get(soundId) ?? 0) + 1);
+  return () => {
+    const count = (inlinePreviews.get(soundId) ?? 1) - 1;
+    if (count) inlinePreviews.set(soundId, count);
+    else inlinePreviews.delete(soundId);
+  };
+}
 
 function describeFailure(job: Job): string {
   const reason = job.error ?? translate("error.unknown");
@@ -63,7 +73,7 @@ function react(list: Job[]): void {
     return;
   }
   if (fresh.length) {
-    announceFinished(fresh);
+    announceFinished(fresh.filter((j) => j.kind !== "preview" || !inlinePreviews.has(j.sound_id)));
     void useStudio().refreshSounds();
   }
 }
@@ -131,5 +141,5 @@ function stop(): void {
  * 10 s otherwise; a job that finishes triggers a sound refresh and a toast.
  */
 export function useJobs() {
-  return { jobs, active, start, stop, refresh };
+  return { jobs, active, start, stop, refresh, suppressPreviewToast };
 }

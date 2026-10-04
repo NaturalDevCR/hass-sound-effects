@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref, useId, watch } from "vue";
 import { mdiSpeaker } from "@mdi/js";
 import { messageOf, ui } from "@/api/client";
 import { useStudio } from "@/composables/useStudio";
@@ -9,6 +9,7 @@ import Sheet from "./Sheet.vue";
 const props = defineProps<{ open: boolean; soundId: string; previewAvailable: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
+const radioName = useId();
 const { state } = useStudio();
 const targets = computed(() => state.value?.settings?.audition_targets ?? []);
 const targetId = ref("");
@@ -76,6 +77,7 @@ async function send() {
             v-model="targetId"
             :value="target.id"
             type="radio"
+            :name="radioName"
             :disabled="pending"
             class="size-5 accent-accent"
           />

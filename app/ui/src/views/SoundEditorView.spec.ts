@@ -19,7 +19,8 @@ const mocks = vi.hoisted(() => ({
     remove: vi.fn(),
   },
   jobs: vi.fn(),
-  engine: { load: vi.fn(), play: vi.fn(), stop: vi.fn(), playing: false, position: 0, onEnded: undefined },
+  engine: { clearCache: vi.fn(), suspend: vi.fn().mockResolvedValue(undefined), setLoop: vi.fn(), load: vi.fn(), play: vi.fn(), stop: vi.fn(), playing: false, position: 0, onEnded: undefined },
+  media: { src: "", currentTime: 0, paused: true, play: vi.fn().mockResolvedValue(undefined), pause: vi.fn(), load: vi.fn(), removeAttribute: vi.fn(), onended: null as (() => void) | null },
   player: { stop: vi.fn(), toggle: vi.fn() },
 }));
 vi.mock("@/api/client", async (original) => ({
@@ -67,7 +68,7 @@ async function open(id = "roar") {
       plugins: [router],
       stubs: {
         teleport: true,
-        WaveformEditor: { props: ["recipe"], template: '<div data-test="waveform" />' },
+        WaveformEditor: { name: "WaveformEditor", props: ["recipe"], template: '<div data-test="waveform" />' },
       },
     },
   });
@@ -76,6 +77,9 @@ async function open(id = "roar") {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal("Audio", function () { return mocks.media; });
+  mocks.media.src = "";
+  mocks.media.play.mockResolvedValue(undefined);
   useI18n().setLocale("en");
   useConfirm().answer(false);
   const studio = useStudio();
@@ -109,6 +113,8 @@ afterEach(() => {
   wrapper?.unmount();
   useConfirm().answer(false);
   document.body.innerHTML = "";
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 describe("sound editor", () => {
   it("disables unchanged save, publishes selected gain/profile and stays open", async () => {
@@ -168,18 +174,17 @@ describe("sound editor", () => {
     await open();
     await wrapper.get('[data-test="preview"]').trigger("click");
     await flushPromises();
+    expect(mocks.media.play.mock.invocationCallOrder[0]).toBeLessThan(mocks.api.preview.mock.invocationCallOrder[0]!);
     expect(mocks.api.preview).toHaveBeenCalledWith("roar", useStudio().sounds.value[0]!.recipe);
-    expect(mocks.player.toggle).not.toHaveBeenCalled();
+    expect(mocks.media.play).toHaveBeenCalledTimes(1);
     expect(wrapper.get('[data-test="preview"]').attributes("aria-busy")).toBe("true");
     useJobs().jobs.value = [{ ...job("done"), id: "unrelated" }];
     await flushPromises();
-    expect(mocks.player.toggle).not.toHaveBeenCalled();
+    expect(mocks.media.play).toHaveBeenCalledTimes(1);
     useJobs().jobs.value = [job("done")];
     await flushPromises();
-    expect(mocks.player.toggle).toHaveBeenCalledWith(
-      "roar:preview",
-      expect.stringMatching(/^api\/ui\/sounds\/roar\/preview\?v=/),
-    );
+    expect(mocks.media.play).toHaveBeenCalledTimes(2);
+    expect(mocks.media.src).toMatch(/^api\/ui\/sounds\/roar\/preview\?v=/);
     expect(wrapper.text()).toContain("Preview ready");
   });
   it("shows failed preview inline and allows retry", async () => {
@@ -189,7 +194,7 @@ describe("sound editor", () => {
     useJobs().jobs.value = [{ ...job("failed"), error: "Render failed" }];
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toContain("Render failed");
-    expect(mocks.player.toggle).not.toHaveBeenCalled();
+    expect(mocks.media.play).toHaveBeenCalledTimes(1);
     expect(wrapper.get('[data-test="preview"]').attributes("disabled")).toBeUndefined();
   });
   it("handles keyboard shortcuts and ignores typing and modal dialogs", async () => {
@@ -214,7 +219,7 @@ describe("sound editor", () => {
   it("reports decode failure and retries", async () => {
     mocks.engine.load.mockRejectedValueOnce(new Error("Bad audio"));
     await open();
-    expect(wrapper.get('[role="alert"]').text()).toContain("Bad audio");
+    expect(wrapper.get('[role="alert"]').text()).toContain("Could not decode this audio");
     await wrapper.get('[data-test="retry-decode"]').trigger("click");
     await flushPromises();
     expect(wrapper.find('[data-test="waveform"]').exists()).toBe(true);
@@ -231,7 +236,7 @@ describe("sound editor", () => {
   });
 });
 
-it("nudges trim by hundredths, shift by tenths and clamps fades after trimming", async () => {
+it("nudges trim by hundredths, shift by tenths and preserves invalid fades after trimming", async () => {
   await open();
   const start = wrapper.get('[data-test="trim-start"]');
   await start.trigger("keydown", { key: "ArrowUp" });
@@ -240,9 +245,9 @@ it("nudges trim by hundredths, shift by tenths and clamps fades after trimming",
   expect((start.element as HTMLInputElement).value).toBe("0.11");
   await wrapper.get('[data-test="fade_in"]').setValue("4");
   await wrapper.get('[data-test="trim-end"]').setValue("1");
-  expect(
-    Number((wrapper.get('[data-test="fade_in"]').element as HTMLInputElement).value),
-  ).toBeLessThanOrEqual(0.89);
+  expect(wrapper.text()).toContain("4.00 s");
+  expect(wrapper.text()).toContain("The fades are longer than the trimmed clip.");
+  expect(wrapper.get('[data-test="publish"]').attributes("disabled")).toBeDefined();
 });
 it("invalidates an exact preview when the recipe changes and preserves new edits during publishing", async () => {
   await open();

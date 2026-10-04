@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from "vue";
 import WaveSurfer from "wavesurfer.js";
 import Regions, { type Region } from "wavesurfer.js/dist/plugins/regions.esm.js";
 import type { Recipe } from "@/api/types";
 import { useI18n } from "@/i18n";
-const props = defineProps<{ peaks: number[]; duration: number; recipe: Recipe; position: number }>();
+const props = defineProps<{ peaks: number[]; duration: number; recipe: Recipe; position: Readonly<Ref<number>> }>();
 const emit = defineEmits<{
   trim: [start: number, end: number];
   seek: [time: number];
@@ -12,6 +12,13 @@ const emit = defineEmits<{
 }>();
 const { t } = useI18n();
 const container = ref<HTMLElement>();
+const width = ref(0);
+const handleWidth = computed(() => {
+  const regionWidth = (props.recipe.trim_end ?? props.duration) - props.recipe.trim_start;
+  const pixels = regionWidth / props.duration * width.value;
+  return `${pixels < 64 ? Math.max(4, Math.min(24, pixels / 3)) : 24}px`;
+});
+let observer: ResizeObserver | undefined;
 let ws: WaveSurfer | undefined;
 let region: Region | undefined;
 let resizing = false;
@@ -22,6 +29,9 @@ function height() {
   ws?.setOptions({ height: media.matches ? 120 : 96 });
 }
 onMounted(() => {
+  observer = new ResizeObserver(([entry]) => { width.value = entry!.contentRect.width; });
+  observer.observe(container.value!);
+  width.value = container.value!.clientWidth;
   media = window.matchMedia("(min-width: 768px)");
   const plugin = Regions.create();
   ws = WaveSurfer.create({
@@ -52,7 +62,7 @@ onMounted(() => {
       resize: true,
       minLength: Math.min(0.01, props.duration),
     });
-    ws?.setTime(props.position);
+    ws?.setTime(props.position.value);
   });
   plugin.on("region-update", (next) => {
     resizing = true;
@@ -74,11 +84,12 @@ watch(
   },
 );
 watch(
-  () => props.position,
+  () => props.position.value,
   (time) => ws?.setTime(time),
 );
 onBeforeUnmount(() => {
   media?.removeEventListener("change", height);
+  observer?.disconnect();
   ws?.destroy();
 });
 </script>
@@ -86,6 +97,8 @@ onBeforeUnmount(() => {
   <div
     ref="container"
     data-test="waveform"
+    role="group"
+    :style="{ '--trim-handle-width': handleWidth }"
     class="editor-waveform min-w-0 rounded-lg bg-ground"
     :aria-label="t('editor.waveform')"
   />
@@ -96,7 +109,7 @@ onBeforeUnmount(() => {
   touch-action: none;
 }
 .editor-waveform ::part(region-handle) {
-  width: 24px !important;
+  width: var(--trim-handle-width, 24px) !important;
   border: 0 !important;
   touch-action: none;
   background:

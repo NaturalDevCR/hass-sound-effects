@@ -31,7 +31,10 @@ const fades = ["fade_in", "fade_out"] as const;
         @input="emit('change', { gain_db: Number(($event.target as HTMLInputElement).value) })"
         @dblclick="emit('change', { gain_db: 0 })"
       />
-      <p class="text-xs text-muted">{{ t("editor.gainHint") }}</p>
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-xs text-muted">{{ t("editor.gainHint") }}</p>
+        <button data-test="reset-gain" class="btn-ghost min-h-11! px-2 text-xs" @click="emit('change', { gain_db: 0 })">{{ t("editor.resetGain") }}</button>
+      </div>
     </div>
     <div v-for="fade in fades" :key="fade">
       <label :for="`${id}-${fade}`" class="flex justify-between text-sm"
