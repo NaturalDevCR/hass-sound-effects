@@ -18,6 +18,7 @@ from .media import SUPPORTED_EXTENSIONS
 
 CHUNK_SIZE = 4194304
 MAX_UPLOAD_SESSIONS = 20
+IDLE_SESSION_TIMEOUT = timedelta(minutes=15)
 
 
 class UnsupportedUploadError(InvalidError):
@@ -69,6 +70,10 @@ class UploadStore:
         if size > self._max_bytes():
             raise UploadTooLargeError("Upload exceeds the maximum size.")
         with self._sessions_lock:
+            at_capacity = len(self._uploads) >= MAX_UPLOAD_SESSIONS
+        if at_capacity:
+            self._evict_idle_sessions()
+        with self._sessions_lock:
             if len(self._uploads) >= MAX_UPLOAD_SESSIONS:
                 raise InvalidError("Too many concurrent upload sessions (maximum 20).")
             upload_id = secrets.token_hex(16)
@@ -81,6 +86,24 @@ class UploadStore:
                 raise
             self._uploads[upload_id] = _Upload(filename, name, size, part)
             return upload_id
+
+    def _evict_idle_sessions(self) -> None:
+        cutoff = time.time() - IDLE_SESSION_TIMEOUT.total_seconds()
+        with self._sessions_lock:
+            candidates = list(self._uploads.items())
+        for upload_id, upload in candidates:
+            with upload.lock:
+                with self._sessions_lock:
+                    if self._uploads.get(upload_id) is not upload:
+                        continue
+                    try:
+                        is_idle = upload.part.stat().st_mtime < cutoff
+                    except FileNotFoundError:
+                        is_idle = True
+                    if not is_idle:
+                        continue
+                    del self._uploads[upload_id]
+                upload.part.unlink(missing_ok=True)
 
     def _get(self, upload_id: str) -> _Upload:
         with self._sessions_lock:

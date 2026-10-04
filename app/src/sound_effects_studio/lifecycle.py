@@ -93,7 +93,7 @@ async def _clean_up(app: FastAPI) -> None:
     if uploads is None:
         return
     try:
-        result = uploads.purge_stale()
+        result = await asyncio.to_thread(uploads.purge_stale)
         if inspect.isawaitable(result):
             await result
     except Exception:

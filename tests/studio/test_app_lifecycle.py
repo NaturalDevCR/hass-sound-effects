@@ -971,3 +971,22 @@ async def test_housekeeping_loop_stops_when_cancelled(paths: Paths, made: list[F
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+def test_upload_purge_runs_in_a_worker_thread(paths: Paths, made: list[FastAPI]):
+    app = build(made, paths)
+    completed: list[bool] = []
+
+    class Uploads:
+        def purge_stale(self) -> None:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                completed.append(True)
+            else:
+                completed.append(False)
+
+    app.state.uploads = Uploads()
+    with TestClient(app):
+        assert wait_for(lambda: bool(completed))
+    assert completed[0]

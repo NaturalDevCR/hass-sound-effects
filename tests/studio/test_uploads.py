@@ -176,3 +176,18 @@ def test_session_cap_freed_by_finish_and_purge(paths, tmp_path):
     store.create("replacement.wav", 1)
     store.purge_stale(timedelta(seconds=-1))
     assert store.create("after-purge.wav", 1)
+
+
+def test_session_cap_evicts_sessions_idle_more_than_15_minutes(paths):
+    store = UploadStore(paths, lambda: 1)
+    uploads = [store.create("tone.wav", 1) for _ in range(20)]
+    old = time.time() - 16 * 60
+    for upload in uploads[:3]:
+        os.utime(paths.uploads_dir / f"{upload}.part", (old, old))
+    replacement = store.create("replacement.wav", 1)
+    assert replacement not in uploads
+    for upload in uploads[:3]:
+        with pytest.raises(NotFoundError):
+            store.write_chunk(upload, 0, b"x")
+    for upload in uploads[3:]:
+        assert store.write_chunk(upload, 0, b"x") == 1
