@@ -303,3 +303,13 @@ it("reports scheduling failure when loop is enabled without leaking a running so
   expect(engine.onError).toHaveBeenCalledWith(failure);
   expect(engine.playing).toBe(false);
 });
+it("skips expired loop passes after a late timer without stacking sources", async () => {
+  vi.useFakeTimers();
+  const { engine, ctx, sources, buffer } = fakeContext();
+  engine.play(buffer, { ...settings, trimStart: 0, trimEnd: 0.2 }, { loop: true });
+  ctx.currentTime = 12;
+  await vi.advanceTimersByTimeAsync(100);
+  expect(sources).toHaveLength(2);
+  expect(sources[1].start).toHaveBeenCalledWith(12, 0, 0.2);
+  engine.stop();
+});

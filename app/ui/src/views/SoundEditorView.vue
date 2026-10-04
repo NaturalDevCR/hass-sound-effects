@@ -86,7 +86,7 @@ function shortcut(event: KeyboardEvent) {
   const target = event.target;
   if (
     target instanceof HTMLElement &&
-    (target.closest('textarea,[contenteditable]:not([contenteditable="false"])') ||
+    (target.closest('select,textarea,[contenteditable]:not([contenteditable="false"])') ||
       (target instanceof HTMLInputElement && ["text", "number", "search", "email", "password", "tel", "url", "date", "datetime-local", "month", "week", "time"].includes(target.type)))
   )
     return;
@@ -152,7 +152,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", shortcut));
             {{ t("editor.loadAudio") }}
           </button>
         </div>
-        <TrimInputs :recipe="recipe" :duration="duration" :disabled="!sound.original" @trim="trim" />
+        <TrimInputs :recipe="recipe" :duration="duration" :disabled="!sound.original" @trim="trim" @invalid="editor.trimInvalid.value = $event" />
         <ul v-if="problems.length" role="alert" class="space-y-1 text-sm text-danger">
           <li v-for="problem in problems" :key="problem">{{ t(problem) }}</li>
         </ul>

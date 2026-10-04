@@ -249,3 +249,24 @@ it.each(['[data-test="gain"]', '[data-test="waveform"]'])("toggles playback with
   expect(event.defaultPrevented).toBe(true);
   expect(mocks.engine.play).toHaveBeenCalledOnce();
 });
+it("ignores L/B while a select has focus", async () => {
+  await open();
+  const select = wrapper.get("select");
+  await select.trigger("keydown", { key: "l" });
+  await select.trigger("keydown", { key: "b" });
+  expect(wrapper.get('[data-test="loop"]').attributes("aria-pressed")).toBe("false");
+  expect(wrapper.get('[data-test="bypass"]').attributes("aria-pressed")).toBe("false");
+});
+it("blocks publishing and guards navigation while a committed trim draft is invalid", async () => {
+  const router = await open();
+  await wrapper.get('[data-test="gain"]').setValue("2");
+  await wrapper.get('[data-test="trim-end"]').setValue("oops");
+  await wrapper.get('[data-test="trim-end"]').trigger("blur");
+  expect(wrapper.get('[data-test="publish"]').attributes("disabled")).toBeDefined();
+  await wrapper.get('[data-test="revert"]').trigger("click");
+  void router.push("/");
+  await flushPromises();
+  expect(useConfirm().request.value?.danger).toBe(true);
+  useConfirm().answer(false);
+  await flushPromises();
+});

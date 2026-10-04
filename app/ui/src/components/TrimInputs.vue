@@ -3,7 +3,7 @@ import { computed, nextTick, reactive, ref, useId, watch } from "vue";
 import type { Recipe } from "@/api/types";
 import { useI18n } from "@/i18n";
 const props = defineProps<{ recipe: Recipe; duration: number; disabled: boolean }>();
-const emit = defineEmits<{ trim: [start: number, end: number] }>();
+const emit = defineEmits<{ trim: [start: number, end: number]; invalid: [value: boolean] }>();
 const { t } = useI18n();
 const id = useId();
 type Side = "start" | "end";
@@ -11,6 +11,7 @@ const sides: Side[] = ["start", "end"];
 const end = computed(() => props.recipe.trim_end ?? props.duration);
 const draft = reactive({ start: String(props.recipe.trim_start), end: String(end.value) });
 const invalid = reactive({ start: false, end: false });
+watch(() => invalid.start || invalid.end, (value) => emit("invalid", value), { flush: "sync" });
 const focused = ref<Side | null>(null);
 const value = (side: Side) => (side === "start" ? props.recipe.trim_start : end.value);
 for (const side of sides) {
@@ -25,7 +26,7 @@ function parse(side: Side): number | null {
     : null;
 }
 function edited(side: Side) {
-  invalid[side] = parse(side) === null;
+  invalid[side] = false;
 }
 function commit(side: Side, normalize = false) {
   const number = parse(side);
@@ -46,6 +47,7 @@ function commit(side: Side, normalize = false) {
 }
 function keydown(event: KeyboardEvent, side: Side) {
   if (event.key === "Escape") {
+    if (draft[side] === String(value(side)) && !invalid[side]) return;
     event.preventDefault();
     event.stopPropagation();
     draft[side] = String(value(side));

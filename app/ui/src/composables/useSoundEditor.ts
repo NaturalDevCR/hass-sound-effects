@@ -53,8 +53,9 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
   const detailsDirty = computed(
     () => !equalDetails(effectiveDetails.value, savedDetails.value) || !!tagDraft.value.trim(),
   );
-  const dirty = computed(() => recipeDirty.value || detailsDirty.value);
-  const valid = computed(() => problems.value.length === 0 && !!sound.value?.original);
+  const trimInvalid = ref(false);
+  const dirty = computed(() => recipeDirty.value || detailsDirty.value || trimInvalid.value);
+  const valid = computed(() => !trimInvalid.value && problems.value.length === 0 && !!sound.value?.original);
   const audio = useEditorAudio(
     id,
     recipe,
@@ -107,6 +108,7 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
       if (!next) return;
       if (initializedId !== next.id) {
         initializedId = next.id;
+        trimInvalid.value = false;
         recipe.value = { ...next.recipe };
         details.value = detailsOf(next);
         tagDraft.value = "";
@@ -248,6 +250,7 @@ export function useSoundEditor(id: Readonly<Ref<string>>) {
     recipe,
     details,
     tagDraft,
+    trimInvalid,
     recipeDirty,
     detailsDirty,
     dirty,

@@ -205,7 +205,9 @@ export class AudioEngine {
       const delay = (tail.endTime - this.ctx.currentTime - 0.1) * 1000;
       // Treat sub-ms rounding as due; short clips may need several passes in the horizon.
       if (delay <= 1) {
-        this.schedulePass(tail.endTime, this.start);
+        // A throttled timer may arrive several passes late. Start one fresh pass now;
+        // never enqueue expired passes (Web Audio would start them together).
+        this.schedulePass(Math.max(tail.endTime, this.ctx.currentTime), this.start);
         continue;
       }
       this.timer = setTimeout(() => {
