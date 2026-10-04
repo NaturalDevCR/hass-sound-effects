@@ -1,14 +1,19 @@
 """Real media pipeline, queue lifecycle and catalog notification contracts."""
 
 import asyncio
+import logging
+import os
 import re
 import shutil
+import threading
+import time
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
 import sound_effects_studio.media as media
 from sound_effects_studio.config import Paths
 from sound_effects_studio.db import Database
+from sound_effects_studio.errors import NotFoundError
 from sound_effects_studio.jobs import JobQueue
 from sound_effects_studio.models import Recipe, Settings
 from sound_effects_studio.notifier import CatalogNotifier
@@ -151,11 +156,13 @@ async def test_coalescing_and_fifo(repo, publisher, paths, make_tone):
     preview = queue.enqueue_preview(sound.id, Recipe())
     replacement = queue.enqueue_publish(sound.id)
     assert [job.id for job in queue.list_jobs()] == [replacement.id, preview.id]
-    assert first.id != replacement.id
+    assert first is replacement
+    repo.set_recipe(sound.id, Recipe(trim_end=0.5))
     await queue.start()
     try:
         await queue.wait_idle()
         assert [job.id for job in queue.list_jobs()] == [preview.id, replacement.id]
+        assert repo.get_sound(sound.id).published.duration == pytest.approx(0.5, abs=0.06)
     finally:
         await queue.stop()
 
@@ -229,7 +236,7 @@ async def test_notifier_debounce_and_thread_safety():
     async def send(revision):
         seen.append(revision)
 
-    notifier = CatalogNotifier(send, delay=0.01)
+    notifier = CatalogNotifier(send, delay=0.1)
     try:
         notifier.mark_changed(1)
         notifier.mark_changed(2)
@@ -240,6 +247,79 @@ async def test_notifier_debounce_and_thread_safety():
         await notifier.close()
 
 
+async def test_revision_grace_starts_when_superseded(queue, repo, publisher, paths, make_tone):
+    sound = await imported(queue, repo, paths, make_tone)
+    r1 = paths.publish_dir / sound.published.filename
+    old = time.time() - 25 * 3600
+    os.utime(r1, (old, old))
+    for revision in (2, 3):
+        job = queue.enqueue_publish(sound.id)
+        await queue.wait_idle()
+        assert job.status == "done"
+        assert repo.get_sound(sound.id).published.revision == revision
+        assert r1.exists()
+    os.utime(r1, (old, old))
+    assert publisher.cleanup(sound.id, keep={2, 3}) == [r1.name]
+    assert not r1.exists()
+    assert all((paths.publish_dir / f"{sound.id}-r{n}.mp3").exists() for n in (2, 3))
+
+
+@pytest.mark.parametrize("error", [RuntimeError(), media.MediaError("bad media"), NotFoundError()])
+async def test_job_failure_logging(queue, repo, paths, make_tone, monkeypatch, caplog, error):
+    sound = add_sound(repo, paths, make_tone(seconds=1))
+
+    async def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(media, "probe", fail)
+    job = queue.enqueue_import(sound.id)
+    await queue.wait_idle()
+    assert job.error == (str(error) or type(error).__name__)
+    records = [r for r in caplog.records if r.name == "sound_effects_studio.jobs"]
+    assert records
+    expected = logging.ERROR if isinstance(error, RuntimeError) else logging.WARNING
+    assert all(r.levelno == expected for r in records)
+    assert all(bool(r.exc_info) == (expected == logging.ERROR) for r in records)
+
+
+async def test_deleted_queued_sound_is_warning(repo, publisher, paths, make_tone, caplog):
+    sound = add_sound(repo, paths, make_tone(seconds=1))
+    queue = JobQueue(repo, publisher, paths)
+    job = queue.enqueue_publish(sound.id)
+    repo.delete_sound(sound.id)
+    await queue.start()
+    try:
+        await queue.wait_idle()
+        assert job.status == "failed"
+        assert caplog.records
+        assert all(r.levelno == logging.WARNING and not r.exc_info for r in caplog.records)
+    finally:
+        await queue.stop()
+
+
+async def test_preview_stages_locally_and_removes_deleted_sound(
+    queue, repo, paths, make_tone, monkeypatch
+):
+    sound = await imported(queue, repo, paths, make_tone)
+    render = media.render
+    destinations = []
+
+    async def delete_after_render(src, dst, **kwargs):
+        destinations.append(dst)
+        await render(src, dst, **kwargs)
+        repo.delete_sound(sound.id)
+
+    monkeypatch.setattr(media, "render", delete_after_render)
+    job = queue.enqueue_preview(sound.id, Recipe())
+    await queue.wait_idle()
+    assert job.status == "failed"
+    assert len(destinations) == 1
+    assert destinations[0].parent == paths.previews_dir
+    assert destinations[0].name.startswith(f".tmp-{sound.id}-")
+    assert not (paths.previews_dir / f"{sound.id}.mp3").exists()
+    assert not list(paths.previews_dir.glob(".tmp-*"))
+
+
 async def test_notifier_send_failure_and_close(caplog):
     seen = []
 
@@ -248,7 +328,7 @@ async def test_notifier_send_failure_and_close(caplog):
         if revision == 1:
             raise RuntimeError("offline")
 
-    notifier = CatalogNotifier(send, delay=0.01)
+    notifier = CatalogNotifier(send, delay=0.1)
     notifier.mark_changed(1)
     await notifier.flush()
     assert "offline" in caplog.text
@@ -289,7 +369,7 @@ async def test_running_publish_is_not_coalesced_and_jobs_stay_fifo(
     latest = queue.enqueue_publish(sound.id)
     assert [job.id for job in queue.list_jobs()[:3]] == [running.id, latest.id, preview.id]
     assert running.status == "running" and latest.status == "queued"
-    assert replaced.id not in {job.id for job in queue.list_jobs()}
+    assert replaced is latest
     release.set()
     await queue.wait_idle()
     assert repo.get_sound(sound.id).published.revision == 3
@@ -387,7 +467,7 @@ async def test_notifier_marks_during_send_and_ignores_older_revisions():
             entered.set()
             await release.wait()
 
-    notifier = CatalogNotifier(send, delay=0.001)
+    notifier = CatalogNotifier(send, delay=0.1)
     try:
         notifier.mark_changed(1)
         await asyncio.wait_for(entered.wait(), 5)
@@ -398,3 +478,33 @@ async def test_notifier_marks_during_send_and_ignores_older_revisions():
         assert seen == [1, 3]
     finally:
         await notifier.close()
+
+
+async def test_copy_runs_off_loop_and_cancellation_settles_output(
+    queue, repo, paths, make_tone, monkeypatch
+):
+    sound = add_sound(repo, paths, make_tone(name="copy.mp3", seconds=1))
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+    copyfile = shutil.copyfile
+
+    def paused_copy(src, dst):
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(5)
+        return copyfile(src, dst)
+
+    monkeypatch.setattr(shutil, "copyfile", paused_copy)
+    job = queue.enqueue_import(sound.id)
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        stop = asyncio.create_task(queue.stop())
+        await asyncio.sleep(0)
+        assert not stop.done()
+        release.set()
+        await stop
+        assert job.status == "failed" and job.error == "cancelled"
+        assert not list(paths.publish_dir.glob(".tmp-*"))
+        assert repo.get_sound(sound.id).published is None
+    finally:
+        release.set()

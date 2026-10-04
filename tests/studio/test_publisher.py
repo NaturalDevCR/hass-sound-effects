@@ -2,6 +2,7 @@
 
 import os
 import re
+import shutil
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -35,12 +36,22 @@ def test_commit_is_atomic(paths: Paths, monkeypatch):
     final.write_bytes(b"old complete file")
     tmp = publisher.temp_path("boo")
     assert re.fullmatch(r"\.tmp-boo-[a-f0-9]{8}\.mp3", tmp.name)
+    assert tmp.parent == paths.publish_dir
     assert tmp != publisher.temp_path("boo")
     tmp.write_bytes(b"new complete file")
     replace = os.replace
+    fsync = os.fsync
+    synced = []
     calls = []
 
+    def sync(fd):
+        synced.append(fd)
+        fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", sync)
+
     def observe(source, destination):
+        assert len(synced) == 1
         assert final.read_bytes() == b"old complete file"
         assert source == tmp and destination == final
         calls.append((source, destination))
@@ -117,3 +128,50 @@ def test_storage_usage_and_remove_all(paths: Paths):
     assert not list((paths.publish_dir / "_audition").iterdir())
     publisher.remove_all("boo")
     assert publisher.cleanup("boo", set(), timedelta(0)) == []
+
+
+@pytest.mark.parametrize("initialized", [False, True])
+def test_missing_directories_are_harmless(paths, initialized):
+    publisher = Publisher(paths)
+    if initialized:
+        publisher.ensure_dirs()
+        for directory in (paths.publish_dir, paths.originals_dir, paths.previews_dir):
+            shutil.rmtree(directory)
+    assert publisher.cleanup("boo", set()) == []
+    publisher.remove_all("boo")
+    publisher.cleanup_auditions()
+    assert publisher.storage_usage() == {
+        "originals_bytes": 0,
+        "published_bytes": 0,
+        "previews_bytes": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    "operation", ["cleanup", "remove_all", "cleanup_auditions", "storage_usage"]
+)
+@pytest.mark.parametrize("disappear_at", ["stat", "unlink"])
+def test_disappearing_files_are_harmless(paths, monkeypatch, operation, disappear_at):
+    publisher = Publisher(paths)
+    publisher.ensure_dirs()
+    directory = (
+        paths.publish_dir / "_audition" if operation == "cleanup_auditions" else paths.publish_dir
+    )
+    target = directory / ("boo-12345678.mp3" if operation == "cleanup_auditions" else "boo-r1.mp3")
+    target.write_bytes(b"audio")
+    old = time.time() - 25 * 3600
+    os.utime(target, (old, old))
+    original = getattr(Path, disappear_at)
+
+    def disappear(path, *args, **kwargs):
+        if path == target:
+            raise FileNotFoundError(path)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, disappear_at, disappear)
+    if operation == "cleanup":
+        publisher.cleanup("boo", set())
+    elif operation == "remove_all":
+        publisher.remove_all("boo")
+    else:
+        getattr(publisher, operation)()

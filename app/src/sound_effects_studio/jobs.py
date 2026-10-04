@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from . import media
 from .config import Paths
+from .errors import NotFoundError, StudioError
 from .models import Job, JobKind, OriginalInfo, Published, Recipe, utcnow_iso
 from .publisher import Publisher
 from .repository import Repository
@@ -67,6 +68,10 @@ class JobQueue:
         return self._enqueue("preview", sound_id, recipe.model_copy(deep=True))
 
     def _enqueue(self, kind: JobKind, sound_id: str, recipe: Recipe | None = None) -> Job:
+        if kind == "publish":
+            for queued in self._queued:
+                if queued.job.kind == kind and queued.job.sound_id == sound_id:
+                    return queued.job
         sound = self._repo.get_sound(sound_id)
         job = Job(
             id=secrets.token_hex(6),
@@ -76,12 +81,7 @@ class JobQueue:
             created_at=utcnow_iso(),
         )
         entry = _Entry(job, recipe)
-        for index, queued in enumerate(self._queued):
-            if kind == "publish" and queued.job.kind == kind and queued.job.sound_id == sound_id:
-                self._queued[index] = entry
-                break
-        else:
-            self._queued.append(entry)
+        self._queued.append(entry)
         self._idle.clear()
         self._available.set()
         return job
@@ -117,6 +117,8 @@ class JobQueue:
                     self._repo.set_status(job.sound_id, "failed", job.error)
             else:
                 self._repo.set_status(job.sound_id, "failed", job.error)
+        except StudioError as exc:
+            _LOGGER.warning("Could not reset sound status for job %s: %s", job.id, exc)
         except Exception:
             _LOGGER.exception("Could not reset sound status for job %s", job.id)
 
@@ -134,7 +136,12 @@ class JobQueue:
                     self._fail(job, "cancelled", cancelled=True)
                     raise
                 except Exception as exc:
-                    self._fail(job, str(exc))
+                    error = str(exc) or type(exc).__name__
+                    if isinstance(exc, (media.MediaError, StudioError)):
+                        _LOGGER.warning("Job %s failed: %s", job.id, error)
+                    else:
+                        _LOGGER.exception("Job %s failed: %s", job.id, error)
+                    self._fail(job, error)
                 else:
                     job.status = "done"
                     job.progress = 1.0
@@ -174,12 +181,22 @@ class JobQueue:
                 raise media.MediaError(f"Audio is longer than {maximum} s")
         recipe.validate_for(info.duration)
         profile = self._repo.get_profile(recipe.profile_id) if recipe.profile_id else None
-        tmp = self._publisher.temp_path(sound.id)
+        tmp = (
+            self._paths.previews_dir / f".tmp-{sound.id}-{secrets.token_hex(4)}.mp3"
+            if job.kind == "preview"
+            else self._publisher.temp_path(sound.id)
+        )
         final = None
         recorded = False
         try:
             if job.kind != "preview" and media.can_copy_verbatim(info, recipe):
-                shutil.copyfile(src, tmp)
+                copy = asyncio.create_task(asyncio.to_thread(shutil.copyfile, src, tmp))
+                try:
+                    await asyncio.shield(copy)
+                except asyncio.CancelledError:
+                    # The thread cannot be cancelled; settle it before removing its output.
+                    await copy
+                    raise
             else:
 
                 def progress(value: float) -> None:
@@ -196,21 +213,21 @@ class JobQueue:
                 )
             output = await media.probe(tmp)
             if job.kind == "preview":
-                # /data and /homeassistant/www can be different mounts. Stage the complete
-                # render beside the preview so the final replace is always same-filesystem.
                 preview = self._paths.previews_dir / f"{sound.id}.mp3"
-                preview_tmp = preview.with_name(f".tmp-{sound.id}-{secrets.token_hex(4)}.mp3")
+                os.replace(tmp, preview)
                 try:
-                    shutil.copyfile(tmp, preview_tmp)
-                    os.replace(preview_tmp, preview)
-                finally:
-                    preview_tmp.unlink(missing_ok=True)
-                self._repo.set_has_preview(sound.id, True)
+                    self._repo.set_has_preview(sound.id, True)
+                except NotFoundError:
+                    preview.unlink(missing_ok=True)
+                    raise
                 return
             current = self._repo.get_sound(sound.id)
             revision = (current.published.revision if current.published else 0) + 1
             filename = self._publisher.commit(tmp, sound.id, revision)
             final = self._publisher.published_path(filename)
+            # Retention starts when the previous revision becomes superseded.
+            with suppress(FileNotFoundError):
+                os.utime(self._publisher.published_path(f"{sound.id}-r{revision - 1}.mp3"))
             loudness_lufs = true_peak_db = None
             try:
                 measured = await media.measure_loudness(final)
