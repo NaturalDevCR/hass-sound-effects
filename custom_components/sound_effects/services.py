@@ -19,7 +19,7 @@ def _tags(value: object) -> list[str]:
     """Accept a list of strings or comma-separated tags."""
     if isinstance(value, str):
         return [tag.strip() for tag in value.split(",") if tag.strip()]
-    return cast(list[str], vol.Schema([str])(value))
+    return [tag.strip() for tag in cast(list[str], vol.Schema([str])(value)) if tag.strip()]
 
 
 def _loaded_entry(hass: HomeAssistant) -> SoundEffectsConfigEntry:
@@ -36,7 +36,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
         result = await manager.async_select(
             category=call.data["category"],
             tags=call.data.get("tags"),
-            season=call.data.get("season"),
+            season=(call.data.get("season") or "").strip() or None,
             dry_run=call.data["dry_run"],
         )
         return result if call.return_response else None
@@ -56,9 +56,9 @@ async def async_register_services(hass: HomeAssistant) -> None:
             async_select,
             schema=vol.Schema(
                 {
-                    vol.Required("category"): str,
+                    vol.Required("category"): cv.string,
                     vol.Optional("tags"): _tags,
-                    vol.Optional("season"): str,
+                    vol.Optional("season"): cv.string,
                     vol.Optional("dry_run", default=False): cv.boolean,
                 }
             ),
@@ -69,7 +69,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
             DOMAIN,
             "reset_history",
             async_reset_history,
-            schema=vol.Schema({vol.Optional("category"): str}),
+            schema=vol.Schema({vol.Optional("category"): cv.string}),
             supports_response=SupportsResponse.OPTIONAL,
         )
     if not hass.services.has_service(DOMAIN, "refresh"):

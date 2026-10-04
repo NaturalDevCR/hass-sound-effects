@@ -84,7 +84,7 @@
     },
     "reset_history": {
       "name": "Restablecer historial",
-      "description": "Borra el historial de reproducción aleatoria y las últimas selecciones de una categoría, o de todas las categorías si se omite.",
+      "description": "Borra las bolsas de reproducción aleatoria de una categoría, o de todas si se omite. Conserva los últimos sonidos seleccionados.",
       "fields": {
         "category": {
           "name": "Categoría",
@@ -99,10 +99,10 @@
   },
   "exceptions": {
     "unknown_category": {
-      "message": "La categoría solicitada no existe."
+      "message": "La categoría solicitada {category} no existe."
     },
     "unknown_season": {
-      "message": "La temporada solicitada no existe."
+      "message": "La temporada solicitada {season} no existe."
     },
     "no_eligible_sound": {
       "message": "No hay sonidos que cumplan los criterios en la categoría {category}."

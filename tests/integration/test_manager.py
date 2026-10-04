@@ -45,7 +45,7 @@ async def test_full_response_and_no_io(hass, loaded_entry, aioclient_mock, hass_
         "selected_at": manager.last_selection("lion")["selected_at"],
     }
     assert manager.last_selection("lion")["selected_at"].endswith("Z")
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     post = aioclient_mock.mock_calls[-1]
     assert post[0] == "POST"
     assert post[2] == {
@@ -164,6 +164,7 @@ async def test_override_count_and_action_precedence(loaded_entry):
 
 @pytest.mark.parametrize("state", [None, "unknown", "unavailable", "Regular", "Halloween"])
 async def test_season_entity(hass, loaded_entry, state):
+    # Updating options schedules a runtime reload after these immediate assertions.
     hass.config_entries.async_update_entry(
         loaded_entry, options={**loaded_entry.options, "season_entity": "input_select.season"}
     )
@@ -185,6 +186,7 @@ async def test_season_entity(hass, loaded_entry, state):
     "url, expected", [("http://ha.local:8123/", "http://ha.local:8123/"), (None, "")]
 )
 async def test_base_url_options_absent(hass, loaded_entry, url, expected):
+    # Updating options schedules a runtime reload after these immediate assertions.
     hass.config_entries.async_update_entry(loaded_entry, options={"scan_interval": 3600})
     manager = loaded_entry.runtime_data.manager
     with patch("custom_components.sound_effects.manager.get_url") as get_url:
@@ -207,8 +209,12 @@ async def test_reporting_failure_is_swallowed(hass, loaded_entry, error, caplog)
         assert (await loaded_entry.runtime_data.manager.async_select(category="lion"))[
             "sound_id"
         ] == "roar"
-        await hass.async_block_till_done()
+        task = next(iter(loaded_entry._background_tasks))
+        await hass.async_block_till_done(wait_background_tasks=True)
         post.assert_awaited_once()
+        assert task.done()
+        assert not task.cancelled()
+        assert task.exception() is None
     assert "Error doing job" not in caplog.text
 
 
@@ -244,3 +250,33 @@ async def test_remove_history(hass, loaded_entry, hass_storage):
     await hass.async_block_till_done()
     assert f"{DOMAIN}.{loaded_entry.entry_id}.history" not in hass_storage
     assert f"{DOMAIN}.{loaded_entry.entry_id}.catalog" not in hass_storage
+
+
+async def test_raising_listener_does_not_interrupt_selection(hass, loaded_entry, caplog):
+    manager = loaded_entry.runtime_data.manager
+    tasks_seen = []
+
+    def broken():
+        tasks_seen.extend(loaded_entry._background_tasks)
+        raise RuntimeError("broken listener")
+
+    good = Mock()
+    remove_broken = manager.async_add_listener(broken)
+    remove_good = manager.async_add_listener(good)
+    with patch.object(loaded_entry.runtime_data.client, "post_selections") as post:
+        response = await manager.async_select(category="lion")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        post.assert_awaited_once()
+    assert response["sound_id"] == "roar"
+    assert tasks_seen  # Reporting is scheduled before any listener runs.
+    assert all(task.done() and task.exception() is None for task in tasks_seen)
+    good.assert_called_once_with()
+    assert "broken listener" in caplog.text
+    remove_broken()
+    remove_good()
+
+
+async def test_invalid_override_includes_value(loaded_entry):
+    with pytest.raises(ServiceValidationError) as err:
+        await loaded_entry.runtime_data.manager.async_set_override("missing override")
+    assert err.value.translation_placeholders == {"season": "missing override"}

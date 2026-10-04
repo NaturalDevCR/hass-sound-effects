@@ -186,6 +186,7 @@ async def test_corrupt_snapshot_recovers(
 
 
 async def test_options_reload(hass, entry, aioclient_mock, catalog_payload):
+    # Option changes rebuild the runtime and its entity subscriptions.
     online(aioclient_mock, catalog_payload)
     assert await hass.config_entries.async_setup(entry.entry_id)
     with patch.object(hass.config_entries, "async_reload", return_value=True) as reload:
@@ -341,4 +342,30 @@ async def test_discovery_unchanged_does_not_reload(hass, entry, aioclient_mock, 
         await hass.async_block_till_done()
         assert result["reason"] == "already_configured"
         reload.assert_not_awaited()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_retry_entry_revived_by_unchanged_discovery(
+    hass, entry, aioclient_mock, catalog_payload
+):
+    from homeassistant.config_entries import SOURCE_HASSIO
+    from homeassistant.helpers.service_info.hassio import HassioServiceInfo
+
+    aioclient_mock.get(f"{BASE}/health", exc=TimeoutError())
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    aioclient_mock.clear_requests()
+    online(aioclient_mock, catalog_payload)
+    info = HassioServiceInfo(
+        config={**entry.data, "instance_id": "studio-id"},
+        name="Sound Effects Studio",
+        slug="sound_effects_studio",
+        uuid="1234",
+    )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=info
+    )
+    assert result["reason"] == "already_configured"
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
     assert await hass.config_entries.async_unload(entry.entry_id)

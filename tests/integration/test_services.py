@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sound_effects.const import DOMAIN, STORAGE_VERSION
@@ -41,7 +42,7 @@ async def test_shuffle_across_service_calls(hass, loaded_entry):
     assert results[0]["url"].startswith("https://ha.example/local/sound-effects/")
 
 
-@pytest.mark.parametrize("tags", [["es"], " es, es "])
+@pytest.mark.parametrize("tags", [["es"], " es, es ", [" es ", "", "  "]])
 async def test_tags_and_fallback(hass, loaded_entry, tags):
     result = await call(hass, data={"category": "bath", "tags": tags, "season": "Halloween"})
     assert result["sound_id"] == "bath_es"
@@ -71,7 +72,11 @@ async def test_validation_errors(hass, loaded_entry, data, key):
         await call(hass, data=data)
     assert err.value.translation_domain == DOMAIN
     assert err.value.translation_key == key
-    if key == "no_eligible_sound":
+    if key == "unknown_category":
+        assert err.value.translation_placeholders == {"category": "missing"}
+    elif key == "unknown_season":
+        assert err.value.translation_placeholders == {"season": "missing"}
+    elif key == "no_eligible_sound":
         assert err.value.translation_placeholders == {"category": "Intro entrada"}
 
 
@@ -86,10 +91,17 @@ async def test_reset_category_and_all(hass, loaded_entry):
     await call(hass, data={"category": "intro", "season": "halloween"})
     await call(hass, data={"category": "lion"})
     assert await call(hass, "reset_history", {"category": "Intro entrada"}) == {"cleared": 2}
-    assert loaded_entry.runtime_data.manager.last_selection("intro") is None
+    assert loaded_entry.runtime_data.manager.last_selection("intro")["sound_id"] == "boo"
+    intro = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{loaded_entry.entry_id}_category_intro"
+    )
+    assert intro is not None
+    assert hass.states.get(intro).state == "Boo"
     assert loaded_entry.runtime_data.manager.last_selection("lion") is not None
     assert await call(hass, "reset_history") == {"cleared": 1}
     assert await call(hass, "reset_history") == {"cleared": 0}
+    assert loaded_entry.runtime_data.manager.last_selection("intro")["sound_id"] == "boo"
+    assert loaded_entry.runtime_data.manager.last_selection("lion")["sound_id"] == "roar"
     with pytest.raises(ServiceValidationError) as err:
         await call(hass, "reset_history", {"category": "missing"})
     assert err.value.translation_key == "unknown_category"
@@ -130,7 +142,7 @@ async def test_offline_snapshot_selection(hass, aioclient_mock, hass_storage, ca
     assert await hass.config_entries.async_setup(entry.entry_id)
     assert not entry.runtime_data.coordinator.data.connected
     assert (await call(hass, data={"category": "lion"}))["sound_id"] == "roar"
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -139,13 +151,13 @@ async def test_service_dry_run_preserves_existing_history(hass, loaded_entry, ai
 
     manager = loaded_entry.runtime_data.manager
     await call(hass, data={"category": "intro", "season": "regular"})
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     before = manager._history_data()
     count = aioclient_mock.call_count
     events = []
     unsub = hass.bus.async_listen(EVENT_SELECTED, events.append)
     result = await call(hass, data={"category": "intro", "season": "regular", "dry_run": True})
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert manager._history_data() == before
     assert aioclient_mock.call_count == count
     assert events == []
@@ -172,3 +184,33 @@ async def test_action_metadata(hass, loaded_entry):
     assert "boolean" in select["fields"]["dry_run"]["selector"]
     assert descriptions["reset_history"]["response"] == {"optional": True}
     assert "response" not in descriptions["refresh"]
+
+
+@pytest.mark.parametrize("season", ["", " ", "\t\n"])
+async def test_empty_season_uses_automatic(hass, loaded_entry, season):
+    await loaded_entry.runtime_data.manager.async_set_override("halloween")
+    assert (await call(hass, data={"category": "intro", "season": season}))["sound_id"] == "boo"
+
+
+@pytest.mark.parametrize(
+    "action,field", [("select", "category"), ("select", "season"), ("reset_history", "category")]
+)
+async def test_string_fields_use_ha_validation(hass, loaded_entry, action, field):
+    # cv.string accepts scalar values, so these reach the translated lookup error.
+    data = {"category": "intro", field: 123} if action == "select" else {field: 123}
+    with pytest.raises(ServiceValidationError) as err:
+        await call(hass, action, data)
+    assert err.value.translation_key == f"unknown_{field}"
+    assert err.value.translation_placeholders == {field: "123"}
+
+
+@pytest.mark.parametrize("language", ["en", "es"])
+async def test_error_translations_include_unknown_value(language):
+    import json
+    from pathlib import Path
+
+    texts = json.loads(
+        Path(f"custom_components/sound_effects/translations/{language}.json").read_text()
+    )
+    for field in ("category", "season"):
+        assert "{" + field + "}" in texts["exceptions"][f"unknown_{field}"]["message"]

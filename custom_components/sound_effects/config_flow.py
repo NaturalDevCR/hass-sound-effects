@@ -7,7 +7,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigFlowResult
+from homeassistant.config_entries import ConfigEntryState, ConfigFlowResult
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -131,7 +131,7 @@ class SoundEffectsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 entry,
                 data_updates=data,
                 reason="already_configured",
-                reload_even_if_entry_is_unchanged=False,
+                reload_even_if_entry_is_unchanged=entry.state is ConfigEntryState.SETUP_RETRY,
             )
         if self._async_current_entries(include_ignore=False):
             return self.async_abort(reason="single_instance_allowed")

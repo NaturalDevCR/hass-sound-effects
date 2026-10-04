@@ -99,7 +99,9 @@ class SoundEffectsManager:
                 season = self.coordinator.data.catalog.find_season(season_id)
                 if season is None:
                     raise ServiceValidationError(
-                        translation_domain=DOMAIN, translation_key="unknown_season"
+                        translation_domain=DOMAIN,
+                        translation_key="unknown_season",
+                        translation_placeholders={"season": season_id},
                     )
                 season_id = season.id
             if self._override == season_id:
@@ -126,7 +128,9 @@ class SoundEffectsManager:
             )
         except UnknownSeasonError as err:
             raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="unknown_season"
+                translation_domain=DOMAIN,
+                translation_key="unknown_season",
+                translation_placeholders={"season": str(err)},
             ) from err
 
     def active_season(self) -> tuple[str, str]:
@@ -150,7 +154,9 @@ class SoundEffectsManager:
         category = self.coordinator.data.catalog.find_category(ref)
         if category is None:
             raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="unknown_category"
+                translation_domain=DOMAIN,
+                translation_key="unknown_category",
+                translation_placeholders={"category": ref},
             )
         return category
 
@@ -208,7 +214,6 @@ class SoundEffectsManager:
                 self._last[category_def.id] = {**deepcopy(response), "selected_at": selected_at}
                 self._schedule_save()
                 self.hass.bus.async_fire(EVENT_SELECTED, deepcopy(response))
-                self._notify_listeners()
                 self.entry.async_create_background_task(
                     self.hass,
                     self._async_report_selection(
@@ -222,6 +227,7 @@ class SoundEffectsManager:
                     f"{DOMAIN} report selection",
                     eager_start=False,
                 )
+                self._notify_listeners()
             return response
 
     async def _async_report_selection(self, event: dict[str, Any]) -> None:
@@ -231,7 +237,7 @@ class SoundEffectsManager:
             _LOGGER.debug("Unable to report selection to Studio", exc_info=True)
 
     async def async_reset_history(self, category: str | None = None) -> int:
-        """Clear matching bags and last selections without changing the override."""
+        """Clear matching shuffle bags, retaining last selections and the override."""
         async with self._lock:
             category_id = self._category(category).id if category is not None else None
             keys = [
@@ -239,14 +245,9 @@ class SoundEffectsManager:
                 for key in self._bags
                 if category_id is None or key.split("|", 1)[0] == category_id
             ]
-            had_last = bool(self._last) if category_id is None else category_id in self._last
             for key in keys:
                 del self._bags[key]
-            if category_id is None:
-                self._last.clear()
-            else:
-                self._last.pop(category_id, None)
-            if keys or had_last:
+            if keys:
                 self._schedule_save()
                 self._notify_listeners()
             return len(keys)
@@ -265,7 +266,10 @@ class SoundEffectsManager:
     @callback
     def _notify_listeners(self) -> None:
         for update in tuple(self._listeners):
-            update()
+            try:
+                update()
+            except Exception:
+                _LOGGER.exception("Error notifying Sound Effects listener")
 
     def bag_sizes(self) -> dict[str, int]:
         """Return bag keys and remaining counts without exposing sound history."""

@@ -84,7 +84,7 @@
     },
     "reset_history": {
       "name": "Reset history",
-      "description": "Clear shuffle bags and last selections for a category, or for all categories when omitted.",
+      "description": "Clear shuffle bags for a category, or for all categories when omitted. Keeps the last selected sounds.",
       "fields": {
         "category": {
           "name": "Category",
@@ -99,10 +99,10 @@
   },
   "exceptions": {
     "unknown_category": {
-      "message": "The requested category does not exist."
+      "message": "The requested category {category} does not exist."
     },
     "unknown_season": {
-      "message": "The requested season does not exist."
+      "message": "The requested season {season} does not exist."
     },
     "no_eligible_sound": {
       "message": "No eligible sound was found in category {category}."
