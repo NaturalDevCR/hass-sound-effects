@@ -119,10 +119,7 @@
     },
     "select": {
       "season_override": {
-        "name": "Season override",
-        "state": {
-          "Auto": "Auto"
-        }
+        "name": "Season override"
       }
     },
     "binary_sensor": {

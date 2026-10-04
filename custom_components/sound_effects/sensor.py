@@ -108,7 +108,8 @@ class SoundEffectsCategorySensor(SoundEffectsEntity, SensorEntity):
             self._attr_name = category.name
             self._attr_icon = category.icon
         last = self.manager.last_selection(self.category.id) or {}
-        self._attr_native_value = str(last["title"]) if last else None
+        title = last.get("title")
+        self._attr_native_value = str(title) if title is not None else None
         self._attr_extra_state_attributes = {
             "category_id": self.category.id,
             **{

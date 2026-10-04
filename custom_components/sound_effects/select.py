@@ -36,5 +36,12 @@ class SoundEffectsSeasonOverrideSelect(SoundEffectsEntity, SelectEntity):
         self._attr_current_option = season.name if season is not None else AUTO
 
     async def async_select_option(self, option: str) -> None:
-        # The manager validates names and persists the corresponding season id.
-        await self.manager.async_set_override(None if option == AUTO else option)
+        # Options are season names; persist the matching season id so a season whose id
+        # equals another season's name can never be picked by mistake.
+        if option == AUTO:
+            await self.manager.async_set_override(None)
+            return
+        season_id = next(
+            (s.id for s in self.coordinator.data.catalog.seasons if s.name == option), None
+        )
+        await self.manager.async_set_override(season_id)

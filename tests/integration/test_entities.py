@@ -540,3 +540,29 @@ async def test_disabled_season_sensor_does_not_break_category_updates(
     await hass.async_block_till_done()
     assert hass.states.get(intro).attributes["available"] == 1
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_override_select_maps_names_to_ids(
+    hass, loaded_entry, aioclient_mock, catalog_payload
+):
+    # A season whose id equals another season's name must not hijack the selection.
+    tricky = copy.deepcopy(catalog_payload)
+    tricky["revision"] = 9
+    tricky["seasons"].append(
+        {
+            "id": "halloween_name",
+            "name": "halloween",
+            "color": "#000000",
+            "icon": "mdi:ghost",
+            "start": "05-01",
+            "end": "05-02",
+            "priority": 1,
+        }
+    )
+    mock_studio(aioclient_mock, tricky)
+    await refresh(hass, loaded_entry)
+    override = entity_id(hass, loaded_entry, "select", "season_override")
+    await select_option(hass, override, "halloween")
+    assert loaded_entry.runtime_data.manager.override_season == "halloween_name"
+    await select_option(hass, override, "Halloween")
+    assert loaded_entry.runtime_data.manager.override_season == "halloween"

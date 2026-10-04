@@ -119,10 +119,7 @@
     },
     "select": {
       "season_override": {
-        "name": "Temporada manual",
-        "state": {
-          "Auto": "Automática"
-        }
+        "name": "Temporada manual"
       }
     },
     "binary_sensor": {
