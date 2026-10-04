@@ -5,7 +5,7 @@ import type { SoundStatus } from "@/api/types";
 import Icon from "@/components/Icon.vue";
 import { useI18n } from "@/i18n";
 
-const props = defineProps<{ status: SoundStatus }>();
+const props = defineProps<{ status: SoundStatus; label?: string }>();
 const { t } = useI18n();
 
 // Color is never the only signal: every state also has its own icon and label.
@@ -25,6 +25,6 @@ const look = computed(() => looks[props.status]);
     :class="look.tone"
   >
     <Icon :path="look.icon" :size="14" :class="{ 'animate-spin': look.spin }" />
-    {{ t(`status.${status}`) }}
+    {{ label ?? t(`status.${status}`) }}
   </span>
 </template>

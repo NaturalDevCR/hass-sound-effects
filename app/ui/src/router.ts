@@ -58,6 +58,8 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
     ],
     scrollBehavior(to, from, saved) {
       if (saved) return saved;
+      // System owns this scroll: its target is rendered only after state loads.
+      if (to.name === "system" && (to.query.section === "import" || to.hash === "#import")) return false;
       if (to.hash) return { el: to.hash, behavior: prefersReducedMotion() ? "auto" : "smooth" };
       // Opening or closing the editor sheet, or changing filters in the query, must not
       // throw the Library scroll position away.

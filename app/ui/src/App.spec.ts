@@ -1,6 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { createMemoryHistory } from "vue-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeState } from "@/test/system";
 import { useI18n } from "@/i18n";
 import { createAppRouter } from "@/router";
 
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     profiles: { list: vi.fn() },
     sounds: { list: vi.fn() },
     jobs: vi.fn(),
+    importer: { browse: vi.fn() },
   },
 }));
 vi.mock("@/api/client", async (importOriginal) => ({
@@ -35,7 +37,8 @@ async function mountApp(path = "/") {
 beforeEach(() => {
   useI18n().setLocale("en");
   vi.clearAllMocks();
-  mocks.ui.state.mockResolvedValue({ version: "1.0.0" });
+  mocks.ui.state.mockResolvedValue(makeState());
+  mocks.ui.importer.browse.mockResolvedValue({ path: "", parent: null, roots: ["config/www", "media", "share"], entries: [] });
   mocks.ui.categories.list.mockResolvedValue([]);
   mocks.ui.seasons.list.mockResolvedValue([]);
   mocks.ui.profiles.list.mockResolvedValue([]);

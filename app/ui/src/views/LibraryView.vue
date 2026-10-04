@@ -168,7 +168,7 @@ const {
             <Icon :path="mdiUpload" />
             {{ t("library.empty.action") }}
           </RouterLink>
-          <RouterLink :to="{ name: 'system', hash: '#import' }" class="btn">
+          <RouterLink :to="{ name: 'system', query: { section: 'import' } }" class="btn">
             {{ t("library.empty.import") }}
           </RouterLink>
         </EmptyState>

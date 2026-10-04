@@ -44,12 +44,17 @@ describe("scrollBehavior", () => {
 
   it("scrolls to anchors smoothly by default", async () => {
     stubMotion(false);
-    expect(await scroll("/system#import", "/")).toEqual({ el: "#import", behavior: "smooth" });
+    expect(await scroll("/organize#seasons", "/")).toEqual({ el: "#seasons", behavior: "smooth" });
   });
 
   it("jumps instead of animating when the user prefers reduced motion", async () => {
     stubMotion(true);
-    expect(await scroll("/system#import", "/")).toEqual({ el: "#import", behavior: "auto" });
+    expect(await scroll("/organize#seasons", "/")).toEqual({ el: "#seasons", behavior: "auto" });
+  });
+
+  it("lets System scroll Import after its panels have loaded", async () => {
+    expect(await scroll("/system?section=import", "/")).toBe(false);
+    expect(await scroll("/system#import", "/")).toBe(false);
   });
 
   it("keeps Library's scroll when the editor opens, closes or the query changes", async () => {

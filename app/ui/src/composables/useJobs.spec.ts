@@ -140,8 +140,10 @@ describe("useJobs polling", () => {
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(1_500);
     expect(jobs.jobs.value[0]?.progress).toBe(0.2);
+    expect(jobs.error.value).toBe("offline");
     await vi.advanceTimersByTimeAsync(1_500);
     expect(jobs.jobs.value[0]?.progress).toBe(0.9);
+    expect(jobs.error.value).toBeNull();
     jobs.stop();
   });
 

@@ -160,7 +160,7 @@ describe("loading and empty states", () => {
     const { wrapper } = await mountLibrary();
     const empty = wrapper.get('[data-test="empty"]');
     expect(empty.get('a[href="/upload"]').text()).toBe("Upload your first sound");
-    expect(empty.get('a[href="/system#import"]').text()).toBe("Import existing files");
+    expect(empty.get('a[href="/system?section=import"]').text()).toBe("Import existing files");
     expect(wrapper.find('[data-test="search"]').exists()).toBe(false);
   });
 

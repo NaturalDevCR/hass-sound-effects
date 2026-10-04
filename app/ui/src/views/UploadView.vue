@@ -67,6 +67,7 @@ const defaultsOpen = ref(false);
 const newCategory = ref(false);
 const categoryBusy = ref(false);
 const showBar = computed(() => busy.value || items.value.some((item) => ["pending", "uploading", "processing"].includes(item.status)));
+const processingOnly = computed(() => !busy.value && items.value.some((i) => i.status === "processing") && !items.value.some((i) => ["pending", "uploading"].includes(i.status)));
 const count = computed(() => items.value.filter((i) => i.status === "pending").length);
 const valid = computed(() => !!category.value && (seasons.value.all_seasons || seasons.value.seasons.length > 0));
 function upload(): void {
@@ -189,7 +190,7 @@ function created(value: Category): void {
         :disabled="busy || !count || !valid"
         @click="upload"
       >
-        {{ busy ? t("upload.active") : tp("upload.start", count) }}
+        {{ busy ? t("upload.active") : processingOnly ? t("upload.processing") : tp("upload.start", count) }}
       </button>
     </div>
     <Sheet :open="newCategory" :title="t('organize.newCategory')" @close="!categoryBusy && (newCategory = false)"

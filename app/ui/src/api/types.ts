@@ -110,6 +110,7 @@ export type Settings = {
 };
 
 export type State = {
+  hostname: string | null;
   version: string;
   api_token_masked: string;
   catalog_revision: number;

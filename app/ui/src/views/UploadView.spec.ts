@@ -104,3 +104,10 @@ it.each([CATEGORY_DEFAULT, null, "soft"])("upload maps profile choice %s to the 
   if (profile === CATEGORY_DEFAULT) expect(body).not.toHaveProperty("profile_id");
   else expect(body.profile_id).toBe(profile);
 });
+it("labels the sticky bar Processing… when only processing rows remain", async () => {
+  const w = mountView();
+  useUpload().add([new File(["audio"], "bell.wav")]);
+  useUpload().items.value[0]!.status = "processing";
+  await w.vm.$nextTick();
+  expect(w.get('[data-test="upload-bar"] button').text()).toBe("Processing…");
+});

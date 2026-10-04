@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import { ui } from "@/api/client";
+import { ui, messageOf } from "@/api/client";
 import type { Job } from "@/api/types";
 import { translate } from "@/i18n";
 import { useStudio } from "./useStudio";
@@ -11,6 +11,7 @@ const IDLE_POLL_MS = 10_000;
 const MAX_INDIVIDUAL_TOASTS = 3;
 
 const jobs = ref<Job[]>([]);
+const error = ref<string | null>(null);
 const active = computed(() => jobs.value.filter((j) => j.status === "queued" || j.status === "running"));
 
 let running = false;
@@ -84,8 +85,10 @@ function poll(): Promise<void> {
     try {
       const list = await ui.jobs();
       jobs.value = list;
+      error.value = null;
       react(list);
-    } catch {
+    } catch (cause) {
+      error.value = messageOf(cause);
       // keep the last known list; the next tick retries
     }
   })().finally(() => {
@@ -141,5 +144,5 @@ function stop(): void {
  * 10 s otherwise; a job that finishes triggers a sound refresh and a toast.
  */
 export function useJobs() {
-  return { jobs, active, start, stop, refresh, suppressPreviewToast };
+  return { jobs, error, active, start, stop, refresh, suppressPreviewToast };
 }
