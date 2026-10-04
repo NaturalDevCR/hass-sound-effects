@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict
 
+from . import media
 from .config import Paths
 from .errors import InvalidError, NotFoundError
 from .importer import ImportBrowser
@@ -108,7 +109,10 @@ def _validate_profile(repo: Repository, profile_id: str | None) -> None:
 
 
 def _placement_profile(repo: Repository, data: Placement) -> str | None:
-    category = repo.get_category(data.category_id)
+    try:
+        category = repo.get_category(data.category_id)
+    except NotFoundError as exc:
+        raise InvalidError(str(exc)) from exc
     profile_id = (
         data.profile_id if "profile_id" in data.model_fields_set else category.default_profile_id
     )
@@ -117,17 +121,23 @@ def _placement_profile(repo: Repository, data: Placement) -> str | None:
 
 
 def _create_sound(
-    repo: Repository, data: Placement, filename: str, profile_id: str | None
+    repo: Repository,
+    data: Placement,
+    filename: str,
+    profile_id: str | None,
+    title: str | None = None,
 ) -> Sound:
-    title = data.title if isinstance(data, UploadComplete) else None
+    key = safe_filename(filename, preserve_extension_case=True)
     if title is None:
-        title = re.sub(
-            r"\s+", " ", Path(safe_filename(filename)).stem.replace("-", " ").replace("_", " ")
+        title = (
+            re.sub(r"\s+", " ", Path(key).stem.replace("-", " ").replace("_", " ")).strip()
+            or Path(key).stem
+            or "sound"
         )
     return repo.create_sound(
         category_id=data.category_id,
         title=title,
-        key=filename,
+        key=key,
         tags=data.tags,
         seasons=data.seasons,
         all_seasons=data.all_seasons,
@@ -286,6 +296,8 @@ async def audition(sound_id: str, data: AuditionRequest, request: Request) -> di
                 },
             )
         else:
+            with suppress(media.MediaError):
+                duration = (await media.probe(file)).duration
             await supervisor.call_service(
                 "script",
                 "turn_on",
@@ -307,7 +319,7 @@ async def audition(sound_id: str, data: AuditionRequest, request: Request) -> di
 @router.post("/uploads")
 async def create_upload(data: UploadCreate, request: Request) -> dict[str, str | int]:
     try:
-        upload_id = _uploads(request).create(data.filename, data.size)
+        upload_id = await asyncio.to_thread(_uploads(request).create, data.filename, data.size)
     except UnsupportedUploadError as exc:
         raise HTTPException(status_code=415, detail=str(exc)) from exc
     except UploadTooLargeError as exc:
@@ -317,9 +329,23 @@ async def create_upload(data: UploadCreate, request: Request) -> dict[str, str |
 
 @router.put("/uploads/{upload_id}/chunks/{index}")
 async def put_chunk(upload_id: str, index: int, request: Request) -> dict[str, int]:
-    data = await request.body()
+    uploads = _uploads(request)
     try:
-        received = _uploads(request).write_chunk(upload_id, index, data)
+        limit = await asyncio.to_thread(uploads.chunk_limit, upload_id, index)
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                declared_length = int(content_length)
+            except ValueError as exc:
+                raise InvalidError("Invalid Content-Length.") from exc
+            if declared_length > limit:
+                raise UploadTooLargeError("Chunk exceeds the maximum or declared upload size.")
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > limit:
+                raise UploadTooLargeError("Chunk exceeds the maximum or declared upload size.")
+            data.extend(chunk)
+        received = await asyncio.to_thread(uploads.write_chunk, upload_id, index, bytes(data))
     except UploadTooLargeError as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     return {"received": received}
@@ -328,12 +354,20 @@ async def put_chunk(upload_id: str, index: int, request: Request) -> dict[str, i
 @router.post("/uploads/{upload_id}/complete")
 async def complete_upload(upload_id: str, data: UploadComplete, request: Request) -> Sound:
     uploads = _uploads(request)
-    filename = uploads.ready_filename(upload_id)
+    filename = await asyncio.to_thread(uploads.ready_filename, upload_id)
     repo = _repo(request)
     profile_id = _placement_profile(repo, data)
-    sound = _create_sound(repo, data, filename, profile_id)
+    sound = _create_sound(repo, data, filename, profile_id, title=data.title)
     try:
-        uploads.finish(upload_id, _paths(request).originals_dir / sound.id)
+        finish = asyncio.create_task(
+            asyncio.to_thread(uploads.finish, upload_id, _paths(request).originals_dir / sound.id)
+        )
+        try:
+            await asyncio.shield(finish)
+        except asyncio.CancelledError:
+            with suppress(Exception):
+                await finish
+            raise
     except BaseException:
         _publisher(request).remove_all(sound.id)
         repo.delete_sound(sound.id)
@@ -344,28 +378,43 @@ async def complete_upload(upload_id: str, data: UploadComplete, request: Request
 
 @router.get("/import/browse")
 async def browse_import(request: Request, path: str = "") -> dict[str, object]:
-    return _browser(request).browse(path)
+    return await asyncio.to_thread(_browser(request).browse, path)
 
 
 @router.post("/import")
 async def import_files(data: ImportCreate, request: Request) -> dict[str, list[Sound]]:
     repo = _repo(request)
     profile_id = _placement_profile(repo, data)
-    sources = [_browser(request).resolve(path) for path in data.paths]
+    browser = _browser(request)
+
+    def validate_sources() -> list[tuple[str, Path]]:
+        sources: list[tuple[str, Path]] = []
+        for virtual_path in data.paths:
+            source = browser.resolve(virtual_path)
+            if not source.exists():
+                raise NotFoundError("Import file does not exist.")
+            filename = Path(virtual_path).name
+            if Path(filename).suffix.lower() not in SUPPORTED_EXTENSIONS:
+                continue
+            if not source.is_file():
+                raise NotFoundError("Import file does not exist.")
+            sources.append((filename, source))
+        return sources
+
+    sources = await asyncio.to_thread(validate_sources)
     sounds: list[Sound] = []
-    for virtual_path, source in zip(data.paths, sources, strict=True):
-        filename = Path(virtual_path).name
-        if Path(filename).suffix.lower() not in SUPPORTED_EXTENSIONS:
-            continue
-        if not source.is_file():
-            raise NotFoundError("Import file does not exist.")
+    for filename, source in sources:
         sound = _create_sound(repo, data, filename, profile_id)
         directory = _paths(request).originals_dir / sound.id
         try:
-            directory.mkdir(parents=True, exist_ok=True)
-            copy = asyncio.create_task(
-                asyncio.to_thread(shutil.copyfile, source, directory / safe_filename(filename))
-            )
+
+            def copy_source(
+                source: Path = source, directory: Path = directory, filename: str = filename
+            ) -> None:
+                directory.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, directory / safe_filename(filename))
+
+            copy = asyncio.create_task(asyncio.to_thread(copy_source))
             try:
                 await asyncio.shield(copy)
             except asyncio.CancelledError:

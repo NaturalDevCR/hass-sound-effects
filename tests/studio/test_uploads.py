@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from sound_effects_studio.errors import InvalidError, NotFoundError
@@ -96,3 +99,80 @@ def test_purge_stale_including_orphaned_parts(paths):
 def test_all_supported_extensions(paths, extension):
     store = UploadStore(paths, lambda: 1)
     assert store.create("sound" + extension.upper(), 1)
+
+
+def test_concurrent_same_index_serializes_file_and_accounting(paths, tmp_path, monkeypatch):
+    store = UploadStore(paths, lambda: 10)
+    upload = store.create("tone.wav", 3)
+    entered, release, second_opened = threading.Event(), threading.Event(), threading.Event()
+    original_open = Path.open
+
+    class PausedFile:
+        def __init__(self, output):
+            self.output = output
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.output.close()
+
+        def seek(self, offset):
+            return self.output.seek(offset)
+
+        def write(self, data):
+            written = self.output.write(data)
+            self.output.flush()
+            if data == b"abc":
+                entered.set()
+                assert release.wait(5)
+            return written
+
+    def paused_open(path, mode="r", *args, **kwargs):
+        output = original_open(path, mode, *args, **kwargs)
+        if mode == "r+b":
+            if entered.is_set():
+                second_opened.set()
+            return PausedFile(output)
+        return output
+
+    monkeypatch.setattr(Path, "open", paused_open)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(store.write_chunk, upload, 0, b"abc")
+        try:
+            assert entered.wait(2)
+            second = pool.submit(store.write_chunk, upload, 0, b"xyz")
+            assert not second_opened.wait(0.1)
+        finally:
+            release.set()
+        assert first.result() == second.result() == 3
+    assert store.finish(upload, tmp_path / "dest").read_bytes() == b"xyz"
+
+
+def test_concurrent_retries_converge(paths, tmp_path):
+    data = b"a" * CHUNK_SIZE + b"end"
+    store = UploadStore(paths, lambda: len(data))
+    upload = store.create("tone.wav", len(data))
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        writes = [
+            pool.submit(
+                store.write_chunk, upload, i % 2, data[:CHUNK_SIZE] if i % 2 == 0 else b"end"
+            )
+            for i in range(32)
+        ]
+        for write in writes:
+            assert write.result() <= len(data)
+    assert store.write_chunk(upload, 1, b"end") == len(data)
+    assert store.finish(upload, tmp_path / "dest").read_bytes() == data
+
+
+def test_session_cap_freed_by_finish_and_purge(paths, tmp_path):
+    store = UploadStore(paths, lambda: 1)
+    uploads = [store.create("tone.wav", 1) for _ in range(20)]
+    with pytest.raises(InvalidError, match="sessions"):
+        store.create("tone.wav", 1)
+    store.write_chunk(uploads[0], 0, b"x")
+    store.finish(uploads[0], tmp_path / "dest")
+    store.create("replacement.wav", 1)
+    store.purge_stale(timedelta(seconds=-1))
+    assert store.create("after-purge.wav", 1)

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import shutil
+import threading
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sound_effects_studio import media
 from sound_effects_studio.app import create_app
 from sound_effects_studio.auth import INGRESS_PEER
 from sound_effects_studio.models import AuditionTarget, CategoryUpdate, Recipe, Settings
@@ -346,7 +349,9 @@ async def test_audition_payloads_preview_fallback_and_errors(ui, make_tone, path
     audition = paths.www_dir / response["url"].split("/local/")[1]
     assert audition.read_bytes() == published.read_bytes()
     preview = paths.previews_dir / f"{sound['id']}.mp3"
-    preview.write_bytes(b"preview")
+    shutil.copyfile(make_tone(name="preview.mp3", seconds=0.5), preview)
+    preview_duration = (await media.probe(preview)).duration
+    assert preview_duration != pytest.approx(sound["published"]["duration"])
     response = (await client.post(url, json={"target_id": "script", "use_preview": True})).json()
     assert fake.calls[-1] == (
         "script",
@@ -355,13 +360,15 @@ async def test_audition_payloads_preview_fallback_and_errors(ui, make_tone, path
             "entity_id": "script.play",
             "variables": {
                 "url": response["url"],
-                "duration": sound["published"]["duration"],
+                "duration": preview_duration,
                 "title": sound["title"],
                 "volume": 0.4,
             },
         },
     )
-    assert (paths.www_dir / response["url"].split("/local/")[1]).read_bytes() == b"preview"
+    assert (
+        paths.www_dir / response["url"].split("/local/")[1]
+    ).read_bytes() == preview.read_bytes()
     stored = app.state.repo.get_sound(sound["id"])
     assert stored.selection_count == 0 and stored.last_selected_at is None
     fake.error = "speaker offline"
@@ -618,3 +625,221 @@ async def test_import_preserves_selected_symlink_filename(ui, make_tone, paths):
     await app.state.jobs.wait_idle()
     stored = app.state.repo.get_sound(sounds[0]["id"])
     assert stored.status == "ready" and stored.original.filename == "chosen.wav"
+
+
+@pytest.mark.parametrize("size", [3, CHUNK_SIZE + 2])
+async def test_chunk_stream_limits_before_storage(ui, size):
+    app, client = ui
+    body = (
+        await client.post("/api/ui/uploads", json={"filename": "tone.wav", "size": size})
+    ).json()
+    url = f"/api/ui/uploads/{body['upload_id']}/chunks/0"
+    consumed = []
+
+    async def oversized():
+        for chunk in (b"x" * min(size, CHUNK_SIZE), b"x", b"never read"):
+            consumed.append(len(chunk))
+            yield chunk
+
+    response = await client.put(url, content=oversized())
+    assert response.status_code == 413
+    assert len(consumed) == 2
+    assert next(app.state.paths.uploads_dir.iterdir()).read_bytes() == bytes(size)
+    assert (
+        await client.post(url.rsplit("/chunks", 1)[0] + "/complete", json=PLACEMENT)
+    ).status_code == 422
+    consumed.clear()
+    response = await client.put(
+        url, content=oversized(), headers={"Content-Length": str(CHUNK_SIZE + 1)}
+    )
+    assert response.status_code == 413 and consumed == []
+    response = await client.put("/api/ui/uploads/missing/chunks/0", content=oversized())
+    assert response.status_code == 404 and consumed == []
+
+
+async def test_upload_session_cap(ui):
+    app, client = ui
+    for _ in range(20):
+        assert (
+            await client.post("/api/ui/uploads", json={"filename": "tone.wav", "size": 1})
+        ).status_code == 200
+    response = await client.post("/api/ui/uploads", json={"filename": "tone.wav", "size": 1})
+    assert response.status_code in (422, 429) and response.json()["detail"]
+    assert len(list(app.state.paths.uploads_dir.iterdir())) == 20
+
+
+@pytest.mark.parametrize("missing", ["missing.wav", "missing.txt"])
+async def test_import_missing_path_creates_nothing(ui, paths, make_tone, missing):
+    app, client = ui
+    shutil.copyfile(make_tone(seconds=0.5), paths.import_roots["media"] / "tone.wav")
+    response = await client.post(
+        "/api/ui/import", json={**PLACEMENT, "paths": ["media/tone.wav", f"media/{missing}"]}
+    )
+    assert response.status_code == 404
+    assert app.state.repo.list_sounds() == []
+    assert list(paths.originals_dir.iterdir()) == []
+    assert app.state.jobs.list_jobs() == []
+
+
+@pytest.mark.parametrize("method", ["upload", "import"])
+async def test_unknown_placement_category_is_422(ui, make_tone, paths, method):
+    app, client = ui
+    source = make_tone(seconds=0.5)
+    placement = {**PLACEMENT, "category_id": "missing"}
+    if method == "upload":
+        response = await upload(client, source, placement)
+    else:
+        shutil.copyfile(source, paths.import_roots["media"] / source.name)
+        response = await client.post(
+            "/api/ui/import", json={**placement, "paths": ["media/tone.wav"]}
+        )
+    assert response.status_code == 422 and app.state.repo.list_sounds() == []
+    assert list(paths.originals_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "filename,key,title",
+    [
+        ("../Folder/Big__Bell\x00.WAV", "Big__Bell.WAV", "Big Bell"),
+        ("---___.WAV", "---___.WAV", "---___"),
+        ("X" * 200 + ".WAV", "X" * 116 + ".WAV", "X" * 116),
+    ],
+)
+async def test_upload_sanitized_key_and_default_title(ui, make_tone, filename, key, title):
+    app, client = ui
+    data = make_tone(seconds=0.5).read_bytes()
+    body = (
+        await client.post("/api/ui/uploads", json={"filename": filename, "size": len(data)})
+    ).json()
+    url = f"/api/ui/uploads/{body['upload_id']}"
+    await client.put(url + "/chunks/0", content=data)
+    response = await client.post(url + "/complete", json=PLACEMENT)
+    assert response.status_code == 200
+    assert response.json()["key"] == key and response.json()["title"] == title
+    await app.state.jobs.wait_idle()
+
+
+@pytest.mark.parametrize("operation", ["chunk", "browse"])
+async def test_chunk_and_browse_run_off_event_loop(ui, monkeypatch, operation):
+    from sound_effects_studio.importer import ImportBrowser
+    from sound_effects_studio.uploads import UploadStore
+
+    _, client = ui
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+    cls, name = (UploadStore, "write_chunk") if operation == "chunk" else (ImportBrowser, "browse")
+    original = getattr(cls, name)
+
+    def paused(*args):
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(5)
+        return original(*args)
+
+    monkeypatch.setattr(cls, name, paused)
+    if operation == "chunk":
+        body = (
+            await client.post("/api/ui/uploads", json={"filename": "tone.wav", "size": 1})
+        ).json()
+        request = asyncio.create_task(
+            client.put(f"/api/ui/uploads/{body['upload_id']}/chunks/0", content=b"x")
+        )
+    else:
+        request = asyncio.create_task(client.get("/api/ui/import/browse"))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        assert not request.done()
+        release.set()
+        assert (await request).status_code == 200
+    finally:
+        release.set()
+        await asyncio.gather(request, return_exceptions=True)
+
+
+async def test_script_audition_probe_error_falls_back(ui, make_tone, paths, monkeypatch):
+    app, client = ui
+    sound = await ready(ui, make_tone)
+    app.state.supervisor = FakeSupervisor()
+    app.state.media_base_url_effective = "http://ha:8123"
+    app.state.repo.update_settings(
+        Settings(
+            audition_targets=[
+                AuditionTarget(id="script", label="Script", kind="script", entity_id="script.play")
+            ]
+        )
+    )
+    preview = paths.previews_dir / f"{sound['id']}.mp3"
+    preview.write_bytes(b"invalid preview")
+
+    async def fail_probe(file):
+        assert file == preview
+        raise media.MediaError("invalid audio")
+
+    monkeypatch.setattr(media, "probe", fail_probe)
+    response = await client.post(
+        f"/api/ui/sounds/{sound['id']}/audition", json={"target_id": "script", "use_preview": True}
+    )
+    assert response.status_code == 200
+    assert (
+        app.state.supervisor.calls[-1][2]["variables"]["duration"] == sound["published"]["duration"]
+    )
+
+
+async def test_unsupported_upload_is_extension_error(ui):
+    app, client = ui
+    response = await client.post("/api/ui/uploads", json={"filename": "bad.EXE", "size": 1})
+    assert response.status_code == 415
+    assert "extension" in response.json()["detail"].lower()
+    assert list(app.state.paths.uploads_dir.iterdir()) == []
+
+
+async def test_import_sanitizes_key_preserving_case(ui, paths, make_tone):
+    app, client = ui
+    source = paths.import_roots["media"] / "Big__Bell\x01.WAV"
+    shutil.copyfile(make_tone(seconds=0.5), source)
+    response = await client.post(
+        "/api/ui/import", json={**PLACEMENT, "paths": ["media/" + source.name]}
+    )
+    assert response.status_code == 200
+    sound = response.json()["sounds"][0]
+    assert sound["key"] == "Big__Bell.WAV" and sound["title"] == "Big Bell"
+    assert (paths.originals_dir / sound["id"] / "Big__Bell.wav").is_file()
+    await app.state.jobs.wait_idle()
+
+
+async def test_complete_off_loop_cancellation_cleanup(ui, make_tone, monkeypatch):
+    from sound_effects_studio.uploads import UploadStore
+
+    app, client = ui
+    data = make_tone(seconds=0.5).read_bytes()
+    body = (
+        await client.post("/api/ui/uploads", json={"filename": "tone.wav", "size": len(data)})
+    ).json()
+    url = f"/api/ui/uploads/{body['upload_id']}"
+    assert (await client.put(url + "/chunks/0", content=data)).status_code == 200
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+    finish = UploadStore.finish
+
+    def paused_finish(*args):
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(5)
+        return finish(*args)
+
+    monkeypatch.setattr(UploadStore, "finish", paused_finish)
+    request = asyncio.create_task(client.post(url + "/complete", json=PLACEMENT))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        request.cancel()
+        await asyncio.sleep(0)
+        assert not request.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+        assert app.state.repo.list_sounds() == []
+        assert list(app.state.paths.originals_dir.iterdir()) == []
+        assert app.state.jobs.list_jobs() == []
+    finally:
+        release.set()
+        await asyncio.gather(request, return_exceptions=True)
