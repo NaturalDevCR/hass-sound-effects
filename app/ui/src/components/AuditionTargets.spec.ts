@@ -119,12 +119,12 @@ it.each([-0.01, 1.01, NaN, Infinity, "0.5" as unknown as number, undefined as un
 it.each([null, 0, 0.5, 1])("emits normalized targets with valid HA ids and volume %s", async (volume) => {
   const w = mount(AuditionTargets, { props: { targets: [
     { ...validTarget, id: " k ", label: " Kitchen ", entity_id: " script.door_chime_2 ", volume },
-    { ...validTarget, id: "p", kind: "media_player", entity_id: "media_player.123", volume },
+    { ...validTarget, id: "p", kind: "media_player", entity_id: "media_player.123", volume: null },
   ] } });
   await w.get("form").trigger("submit");
   expect(w.emitted("save")?.[0]?.[0]).toEqual([
     { ...validTarget, entity_id: "script.door_chime_2", volume },
-    { ...validTarget, id: "p", kind: "media_player", entity_id: "media_player.123", volume },
+    { ...validTarget, id: "p", kind: "media_player", entity_id: "media_player.123", volume: null },
   ]);
   w.unmount();
 });
@@ -135,5 +135,21 @@ it("names the speaker volume slider and announces its formatted value", async ()
   expect(slider.attributes("aria-valuetext")).toBe("0.50");
   await w.get('[data-test="target-volume"]').setValue("0.75");
   expect(slider.attributes("aria-valuetext")).toBe("0.75");
+  w.unmount();
+});
+it("only offers volume for scripts and clears it when switching to a media player", async () => {
+  const w = mount(AuditionTargets, { props: { targets: [{ ...validTarget, volume: 0.4 }] } });
+  expect(w.find('[data-test="target-volume"]').exists()).toBe(true);
+  await w.get('[data-test="target-kind"]').setValue("media_player");
+  expect(w.find('[data-test="target-volume"]').exists()).toBe(false);
+  expect(w.find('input[type="checkbox"]').exists()).toBe(false);
+  await w.get('[data-test="target-entity"]').setValue("media_player.kitchen");
+  await w.get("form").trigger("submit");
+  expect(w.emitted("save")?.[0]?.[0]).toEqual([
+    { ...validTarget, kind: "media_player", entity_id: "media_player.kitchen", volume: null },
+  ]);
+  await w.get('[data-test="target-kind"]').setValue("script");
+  expect(w.find('[data-test="target-volume"]').exists()).toBe(false);
+  expect(w.find('input[type="checkbox"]').exists()).toBe(true);
   w.unmount();
 });

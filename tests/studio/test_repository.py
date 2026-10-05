@@ -649,7 +649,7 @@ def test_settings_roundtrip(repo: Repository) -> None:
                 label="Kitchen",
                 kind="media_player",
                 entity_id="media_player.kitchen",
-                volume=0.4,
+                volume=None,
             )
         ],
         media_base_url="http://ha.local:8123",
@@ -773,3 +773,15 @@ def test_repository_is_safe_from_worker_threads(repo: Repository) -> None:
     assert errors == []
     assert len(repo.list_sounds()) == 40
     assert repo.catalog_revision() == 40
+
+
+def test_legacy_media_player_volume_is_ignored_when_reading_settings(repo):
+    # Older versions persisted a volume that media-player auditions never used.
+    with repo._db.transaction() as conn:
+        conn.execute(
+            "UPDATE settings SET value = ? WHERE key = 'audition_targets'",
+            (
+                '[{"id":"p","label":"Player","kind":"media_player","entity_id":"media_player.room","volume":0.4}]',
+            ),
+        )
+    assert repo.get_settings().audition_targets[0].volume is None

@@ -160,7 +160,7 @@ the published catalog.
 ### Settings (stored in SQLite, edited in the UI)
 
 - `max_upload_mb` (default 100), `max_duration_s` (default 600).
-- `audition_targets`: list of `{id, label, kind: media_player|script, entity_id, volume?}`.
+- `audition_targets`: list of `{id, label, kind: media_player|script, entity_id, volume?}`. Volume is only supported for script targets and is passed as the `volume` script variable; media-player targets reject a non-null volume. The speakers editor clears volume when switching to a media player, and the audition dialog only displays script volume.
 - `media_base_url`: base URL speakers use to fetch files during auditions.
   Auto-detected on start from the Core config `internal_url`, else from the
   Supervisor primary interface IPv4 and the Core port; overridable in the UI.

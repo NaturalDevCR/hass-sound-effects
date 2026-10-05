@@ -739,6 +739,10 @@ class Repository:
         with self._read() as conn:
             rows = conn.execute("SELECT key, value FROM settings").fetchall()
         stored = {row["key"]: json.loads(row["value"]) for row in rows}
+        # Older Studio versions allowed a media-player volume but never applied it.
+        for target in stored.get("audition_targets", []):
+            if target.get("kind") == "media_player":
+                target["volume"] = None
         return Settings.model_validate(
             {k: v for k, v in stored.items() if k in Settings.model_fields}
         )

@@ -32,19 +32,19 @@ it("explains how to configure speakers when none exist", () => {
   expect(wrapper.get("a").attributes("href")).toBe("#/system");
   expect(wrapper.find('[data-test="send-audition"]').exists()).toBe(false);
 });
-it("lists target details, sends preview selection and shows returned URL", async () => {
+it.each(["script", "media_player"])("lists %s details and only displays script volume", async (kind) => {
   useStudio().state.value = {
     settings: {
       audition_targets: [
-        { id: "bar", label: "Bar speaker", entity_id: "media_player.bar", kind: "media_player", volume: 0.4 },
+        { id: "bar", label: "Bar speaker", entity_id: `${kind}.bar`, kind, volume: 0.4 },
       ],
     },
   } as any;
   audition.mockResolvedValue({ ok: true, url: "http://ha/local/roar.mp3" });
   open(true);
   expect(wrapper.get('input[type="radio"]').attributes("name")).toBeTruthy();
-  expect(wrapper.text()).toContain("media_player.bar");
-  expect(wrapper.text()).toContain("40%");
+  expect(wrapper.text()).toContain(`${kind}.bar`);
+  expect(wrapper.text().includes("40%")).toBe(kind === "script");
   await wrapper.get('[data-test="use-preview"]').setValue(true);
   await wrapper.get('[data-test="send-audition"]').trigger("click");
   await flushPromises();

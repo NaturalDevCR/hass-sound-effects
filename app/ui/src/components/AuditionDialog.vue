@@ -86,7 +86,7 @@ async function send() {
             ><span class="block break-all text-xs text-muted">{{ target.entity_id }}</span
             ><span class="block text-xs text-muted"
               >{{ t(target.kind === "script" ? "editor.script" : "editor.mediaPlayer")
-              }}<template v-if="target.volume !== null">
+              }}<template v-if="target.kind === 'script' && target.volume !== null">
                 · {{ t("editor.volume", { n: Math.round(target.volume * 100) }) }}</template
               ></span
             ></span

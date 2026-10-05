@@ -1555,7 +1555,7 @@ Editor layout (inside `Sheet`): header (title, status pill, close with unsaved-c
 3. **Level** — gain slider −24…+24 dB (step 0.5, double-click resets), fade in/out sliders 0…min(5 s, clip/2), all applied live through `AudioEngine` (re-start playback at current position on change, debounced 80 ms).
 4. **Normalization** — `ProfilePicker` (None + profiles) showing target LUFS; current published loudness/true peak; note that normalization is heard in "Preview render".
 5. **Details** — title, category, `SeasonPicker` (+ all seasons), `TagEditor`, enabled switch, notes; saved via `sounds.update` with its own Save button state.
-6. **Actions** (sticky footer) — "Preview render" (`sounds.preview` → wait for job via `useJobs` → play `audioUrl(id,"preview",Date.now())`), "Test on speaker" (`AuditionDialog`: target list from settings with label/entity/volume, "use preview" toggle when available, confirm sends `sounds.audition`; no targets → link to System), "Save & publish" (`sounds.putRecipe`; disabled when recipe unchanged or invalid; toast; stays open showing rendering status), "Revert" (back to saved recipe), "Delete" (confirm).
+6. **Actions** (sticky footer) — "Preview render" (`sounds.preview` → wait for job via `useJobs` → play `audioUrl(id,"preview",Date.now())`), "Test on speaker" (`AuditionDialog`: target list from settings with label/entity and script-only volume, "use preview" toggle when available, confirm sends `sounds.audition`; no targets → link to System), "Save & publish" (`sounds.putRecipe`; disabled when recipe unchanged or invalid; toast; stays open showing rendering status), "Revert" (back to saved recipe), "Delete" (confirm).
 
 Loading: skeleton while decoding; decoding failure → error panel with "Retry". Works with touch (pointer events) and keyboard (arrow keys nudge focused trim handle input by 0.01 s, shift ×10).
 
@@ -1574,7 +1574,7 @@ Panels (stacked on phones, 2-column grid ≥ lg):
 - **Files served by Home Assistant**: `/config/www` exists / served / created_by_app; when not served show the restart notice.
 - **Media base URL**: effective value, override input (empty = auto) → `settings.put`.
 - **Import existing files** (`id="import"` anchor): `ImportBrowser` breadcrumb navigation over roots, checkbox per supported file, "Select all supported", batch defaults (category, seasons, tags, profile), "Import N files" → `importer.run` → toast + refresh.
-- **Speakers for testing**: `AuditionTargets` list editor (label, kind select, entity_id input with domain hint, optional volume 0–1), save → `settings.put`.
+- **Speakers for testing**: `AuditionTargets` list editor (label, kind select, entity_id input with domain hint, optional volume 0–1 for script targets only; switching to media_player clears volume), save → `settings.put`.
 - **Limits**: max upload MB, max duration s.
 - **Storage**: bytes per area (`formatBytes`).
 - **Jobs**: recent jobs with status, duration, errors.
