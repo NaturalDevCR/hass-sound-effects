@@ -22,7 +22,11 @@ else
 fi
 
 if [ -f app/Dockerfile ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    docker build --build-arg BUILD_ARCH=amd64 --file app/Dockerfile --tag sound-effects-studio:verify app
+    case "$(uname -m)" in
+        arm64 | aarch64) build_arch=aarch64 ;;
+        *) build_arch=amd64 ;;
+    esac
+    docker build --build-arg "BUILD_ARCH=${build_arch}" --file app/Dockerfile --tag sound-effects-studio:verify app
 else
     echo "Skipped Docker build (daemon unavailable); CI builds the image." >&2
 fi
