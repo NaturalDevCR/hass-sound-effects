@@ -1,5 +1,9 @@
 # Troubleshooting
 
+## The integration is not discovered
+
+The App announces itself to Home Assistant when it starts. If you installed the HACS integration (and restarted Home Assistant) after the App was already running, that first announcement had nowhere to go. Restart the App once (**Settings → Apps → Sound Effects Studio → Restart**); a **Sound Effects** card then appears under **Settings → Devices & services → Discovered**. Manual setup always works too.
+
 ## Integration cannot connect
 
 Check **System → Connection** in Sound Effects Studio and confirm the integration uses the displayed hostname, port `8099`, and current API token. If the token was rotated, use the integration's reauthentication flow or reconfigure it with the new token. The host must be reachable from Home Assistant on its local network; do not use the App's Ingress panel URL.

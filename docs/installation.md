@@ -18,7 +18,7 @@ The App publishes audio to `/config/www/sound-effects`, served by Home Assistant
 1. In HACS, open **Integrations**, choose the menu, then **Custom repositories**.
 2. Add `https://github.com/NaturalDevCR/hass-sound-effects` and select category **Integration**.
 3. Download **Sound Effects** and restart Home Assistant.
-4. Open **Settings → Devices & services** and confirm the discovered **Sound Effects Studio** instance.
+4. Open **Settings → Devices & services** and confirm the discovered **Sound Effects** card. If it does not appear, restart the App once so it announces itself again (the integration was not installed yet when the App first started).
 
 The config flow enforces a single instance. When Supervisor rediscovers this App, Home Assistant updates the existing entry's host and token automatically.
 
