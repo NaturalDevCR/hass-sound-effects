@@ -9,14 +9,16 @@ const id = useId();
 type Side = "start" | "end";
 const sides: Side[] = ["start", "end"];
 const end = computed(() => props.recipe.trim_end ?? props.duration);
-const draft = reactive({ start: String(props.recipe.trim_start), end: String(end.value) });
+// Show at most millisecond precision; the recipe keeps the exact value until edited.
+const display = (seconds: number) => String(Number(seconds.toFixed(3)));
+const draft = reactive({ start: display(props.recipe.trim_start), end: display(end.value) });
 const invalid = reactive({ start: false, end: false });
 watch(() => invalid.start || invalid.end, (value) => emit("invalid", value), { flush: "sync" });
 const focused = ref<Side | null>(null);
 const value = (side: Side) => (side === "start" ? props.recipe.trim_start : end.value);
 for (const side of sides) {
   watch(() => value(side), (next) => {
-    if (focused.value !== side && !invalid[side]) draft[side] = String(next);
+    if (focused.value !== side && !invalid[side]) draft[side] = display(next);
   });
 }
 function parse(side: Side): number | null {
@@ -29,6 +31,8 @@ function edited(side: Side) {
   invalid[side] = false;
 }
 function commit(side: Side, normalize = false) {
+  // An untouched (rounded) display value must not rewrite the exact recipe value.
+  if (draft[side] === display(value(side)) && !invalid[side]) return;
   const number = parse(side);
   invalid[side] = number === null;
   if (number === null) return;
@@ -41,16 +45,16 @@ function commit(side: Side, normalize = false) {
     // Wait for the parent's recipe update before normalizing the committed draft.
     const committedDraft = draft[side];
     void nextTick(() => {
-      if (draft[side] === committedDraft && !invalid[side]) draft[side] = String(value(side));
+      if (draft[side] === committedDraft && !invalid[side]) draft[side] = display(value(side));
     });
   }
 }
 function keydown(event: KeyboardEvent, side: Side) {
   if (event.key === "Escape") {
-    if (draft[side] === String(value(side)) && !invalid[side]) return;
+    if (draft[side] === display(value(side)) && !invalid[side]) return;
     event.preventDefault();
     event.stopPropagation();
-    draft[side] = String(value(side));
+    draft[side] = display(value(side));
     invalid[side] = false;
     return;
   }

@@ -32,3 +32,14 @@ it("lets Escape bubble when unchanged, but consumes it to revert a draft", async
   expect((input.element as HTMLInputElement).value).toBe("0");
   w.unmount();
 });
+it("shows durations rounded to milliseconds without rewriting the recipe on blur", async () => {
+  const w = mount(TrimInputs, {
+    props: { recipe: { ...IDENTITY }, duration: 8.045714, disabled: false },
+  });
+  const end = w.get('[data-test="trim-end"]');
+  expect((end.element as HTMLInputElement).value).toBe("8.046");
+  await end.trigger("focus");
+  await end.trigger("blur");
+  expect(w.emitted("trim")).toBeUndefined();
+  w.unmount();
+});
