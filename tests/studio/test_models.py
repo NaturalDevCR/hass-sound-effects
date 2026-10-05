@@ -192,3 +192,18 @@ def test_selected_at_is_normalized_to_utc(raw: str, expected: str) -> None:
 def test_selected_at_rejects_non_timestamps(raw: str) -> None:
     with pytest.raises(ValidationError):
         SelectionEvent(sound_id="a", category_id="b", season_id="regular", selected_at=raw)
+
+
+@pytest.mark.parametrize(
+    "entity_id",
+    ["script.door-chime", "media_player.Living", "media_player._x", "script.a__b", "script.", "x"],
+)
+def test_audition_target_rejects_invalid_entity_ids(entity_id: str) -> None:
+    with pytest.raises(ValidationError):
+        AuditionTarget(id="t", label="T", kind="script", entity_id=entity_id)
+
+
+@pytest.mark.parametrize("entity_id", ["media_player.living_room", "script.door_chime_2"])
+def test_audition_target_accepts_valid_entity_ids(entity_id: str) -> None:
+    target = AuditionTarget(id="t", label="T", kind="script", entity_id=entity_id)
+    assert target.entity_id == entity_id

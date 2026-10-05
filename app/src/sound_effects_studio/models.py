@@ -272,6 +272,11 @@ class BulkSet(BaseModel):
 # --- settings --------------------------------------------------------------------------------
 
 
+# Home Assistant entity id: lowercase slug domain and object id, no leading/trailing or
+# double underscores (same rule as homeassistant.core.valid_entity_id).
+_ENTITY_ID = re.compile(r"(?!.+__)(?!_)[\da-z_]+(?<!_)\.(?!_)[\da-z_]+(?<!_)")
+
+
 class AuditionTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -291,9 +296,11 @@ class AuditionTarget(BaseModel):
     @field_validator("entity_id")
     @classmethod
     def _require_entity_id(cls, value: str) -> str:
-        domain, separator, object_id = value.partition(".")
-        if not domain or not separator or not object_id.strip():
-            raise ValueError("must be a domain.object_id entity id")
+        if not _ENTITY_ID.fullmatch(value):
+            raise ValueError(
+                "must be a Home Assistant entity id (lowercase letters, digits and "
+                "underscores, e.g. media_player.living_room)"
+            )
         return value
 
 
