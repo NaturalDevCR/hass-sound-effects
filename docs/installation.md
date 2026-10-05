@@ -2,6 +2,8 @@
 
 Sound Effects has two parts: the **Sound Effects Studio** Supervisor App and the **Sound Effects** HACS integration. Install both; the integration reads the App's published catalog.
 
+Requires Home Assistant **2025.12.0 or newer**.
+
 ## Install the Supervisor App
 
 1. In Home Assistant, go to **Settings → Apps → App store**.

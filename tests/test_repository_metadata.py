@@ -18,6 +18,7 @@ def test_hacs_metadata() -> None:
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert hacs["name"] == "Sound Effects"
     assert hacs["content_in_root"] is False
+    assert hacs["homeassistant"] == "2025.12.0"
 
 
 def test_app_manifest_core_fields() -> None:

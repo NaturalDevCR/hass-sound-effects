@@ -42,6 +42,8 @@ The App owns audio editing and publishing; the integration owns catalog caching,
 
 ## Installation summary
 
+Requires Home Assistant **2025.12.0 or newer** for the integration storage API.
+
 1. In Home Assistant, open **Settings → Apps → App store → ⋮ → Repositories** and add `https://github.com/NaturalDevCR/hass-sound-effects`.
 2. Install and start **Sound Effects Studio** from the App store.
 3. In HACS, add `https://github.com/NaturalDevCR/hass-sound-effects` as a custom repository of category **Integration**, install **Sound Effects**, and restart Home Assistant.

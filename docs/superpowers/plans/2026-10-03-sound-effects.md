@@ -13,7 +13,7 @@
 - Repository: `NaturalDevCR/hass-sound-effects`, public, license Apache-2.0, default branch `main`.
 - Python `>=3.13`; ruff line length 100, `target-version = "py313"`, lint rules `E,F,I,UP,B,SIM`; pyright `strict` for `app/src/sound_effects_studio` and `custom_components/sound_effects`.
 - App slug `sound_effects_studio`; Ingress port `8099`; base image `ghcr.io/home-assistant/{arch}-base-python:3.13-alpine3.22`; arch `aarch64`, `amd64`; built locally by the Supervisor (no `image:` key).
-- Integration domain `sound_effects`; single instance enforced in the config flow (user decision 2026-10-04: no manifest `single_config_entry`, so Supervisor rediscovery can update host/token); `iot_class: local_polling`; `integration_type: service`; HA minimum `2025.3.0` in `hacs.json`.
+- Integration domain `sound_effects`; single instance enforced in the config flow (user decision 2026-10-04: no manifest `single_config_entry`, so Supervisor rediscovery can update host/token); `iot_class: local_polling`; `integration_type: service`; HA minimum `2025.12.0` in `hacs.json`.
 - Published files: `/homeassistant/www/sound-effects/<sound_id>-r<revision>.mp3` in the App container == `/config/www/sound-effects/...` in HA == URL path `/local/sound-effects/...`.
 - Ingress peer address `172.30.32.2`; dev bypass env `SOUND_EFFECTS_DEV=1`.
 - API token file `/data/api_token`; instance id file `/data/instance_id`.
@@ -281,7 +281,7 @@ coverage/
   "name": "Sound Effects",
   "content_in_root": false,
   "render_readme": true,
-  "homeassistant": "2025.3.0"
+  "homeassistant": "2025.12.0"
 }
 ```
 
