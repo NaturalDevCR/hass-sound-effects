@@ -42,6 +42,24 @@ class JobQueue:
 
     async def start(self) -> None:
         if self._worker is None or self._worker.done():
+            queued_sounds = {
+                entry.job.sound_id for entry in self._queued if entry.job.kind != "preview"
+            }
+            for sound in self._repo.list_sounds():
+                if sound.status == "rendering":
+                    ready = sound.published is not None
+                    self._repo.set_status(
+                        sound.id, "ready" if ready else "failed", None if ready else "interrupted"
+                    )
+                elif sound.status == "processing":
+                    original_dir = self._paths.originals_dir / sound.id
+                    if original_dir.is_dir() and any(
+                        path.is_file() for path in original_dir.iterdir()
+                    ):
+                        if sound.id not in queued_sounds:
+                            self.enqueue_import(sound.id)
+                    else:
+                        self._repo.set_status(sound.id, "failed", "interrupted")
             self._worker = asyncio.create_task(self._work(), name="sound-effects-render-worker")
 
     async def stop(self) -> None:
@@ -229,7 +247,7 @@ class JobQueue:
             final = self._publisher.published_path(filename)
             loudness_lufs = true_peak_db = None
             try:
-                measured = await media.measure_loudness(final)
+                measured = await media.measure_loudness(final, timeout=max(30, 2 * output.duration))
                 loudness_lufs, true_peak_db = measured.input_i, measured.input_tp
             except media.MediaError:
                 _LOGGER.debug(
