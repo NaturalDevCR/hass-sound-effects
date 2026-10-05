@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import cast
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -15,6 +16,9 @@ from .models import SelectionBatch
 from .repository import Repository
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_bearer)])
+
+# ASCII digits only and bounded, so odd validators can never raise.
+_REVISION_ETAG = re.compile(r'"rev-([0-9]{1,15})"')
 
 
 @router.get("/health")
@@ -41,6 +45,7 @@ async def catalog(request: Request) -> Response:
     if _etag_matches(if_none_match, current):
         return Response(status_code=304, headers={"ETag": current})
     document = repo.catalog_document()
+    repo.mark_catalog_served()
     # Tag the body with the revision it was built from, not the one that is current by now.
     return JSONResponse(document, headers={"ETag": _etag(cast("int", document["revision"]))})
 
@@ -67,8 +72,9 @@ def _etag_revisions(header: str) -> list[int]:
     revisions: list[int] = []
     for candidate in header.split(","):
         value = candidate.strip().removeprefix("W/")
-        if value.startswith('"rev-') and value.endswith('"') and value[5:-1].isdigit():
-            revisions.append(int(value[5:-1]))
+        match = _REVISION_ETAG.fullmatch(value)
+        if match:
+            revisions.append(int(match.group(1)))
     return revisions
 
 

@@ -211,7 +211,7 @@ def test_catalog_serves_a_new_body_once_the_revision_moves(
 
 def test_catalog_ignores_a_stale_or_malformed_etag(client: TestClient, auth: dict[str, str]):
     for header in ('"rev-9999"', "garbage", ""):
-        response = client.get("/api/v1/catalog", headers={**auth, "If-None-Match": header})
+        response = client.get("/api/v1/catalog", headers={**auth, "If-None-Match": header.encode()})
         assert response.status_code == 200, header
 
 
@@ -604,7 +604,7 @@ def test_cached_catalog_protects_retired_files(app, client, ingress, auth, repo,
     publisher.cleanup_retired(repo)
     assert old_file.exists()
     # File mtime is irrelevant: age is measured from retirement, not publication.
-    retired = (datetime.now(UTC) - timedelta(hours=25)).isoformat()
+    retired = (datetime.now(UTC) - timedelta(days=8)).isoformat()
     app.state.db.connection.execute("UPDATE retired_files SET retired_at = ?", (retired,))
     publisher.cleanup_retired(repo)
     assert old_file.exists()
@@ -640,7 +640,32 @@ def test_retirement_without_integration_uses_grace_only(app, repo, paths):
     assert file.exists()
     app.state.db.connection.execute(
         "UPDATE retired_files SET retired_at = ?",
-        ((datetime.now(UTC) - timedelta(hours=25)).isoformat(),),
+        ((datetime.now(UTC) - timedelta(days=8)).isoformat(),),
     )
     app.state.publisher.cleanup_retired(repo)
     assert not file.exists()
+
+
+def test_served_but_unacknowledged_catalog_keeps_retired_files(app, client, auth, repo, paths):
+    # A 200 left the App and then the integration went offline before presenting its ETag.
+    from datetime import UTC, datetime, timedelta
+
+    sound = publish_sound(repo)
+    file = paths.publish_dir / sound.published.filename
+    file.write_bytes(b"published")
+    assert client.get("/api/v1/catalog", headers=auth).status_code == 200
+    repo.delete_sound(sound.id)
+    app.state.db.connection.execute(
+        "UPDATE retired_files SET retired_at = ?",
+        ((datetime.now(UTC) - timedelta(days=30)).isoformat(),),
+    )
+    app.state.publisher.cleanup_retired(repo)
+    assert file.exists()
+
+
+@pytest.mark.parametrize(
+    "header", ['"rev-²"', '"rev-99999999999999999999999"', '"rev--1"', '"rev-1x"', "rev-1"]
+)
+def test_odd_etags_never_fail_the_catalog(client, auth, header):
+    response = client.get("/api/v1/catalog", headers={**auth, "If-None-Match": header.encode()})
+    assert response.status_code == 200

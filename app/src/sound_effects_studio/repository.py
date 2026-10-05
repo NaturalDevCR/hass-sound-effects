@@ -280,6 +280,11 @@ def _read_revision(conn: sqlite3.Connection) -> int:
     return int(row["value"]) if row else 0
 
 
+# Superseded or deleted publications stay on disk this long after retirement, as a
+# safety net for cached catalogs (Home Assistant may fail to persist its snapshot).
+RETIREMENT_GRACE = timedelta(days=7)
+
+
 class Repository:
     def __init__(
         self, db: Database, on_catalog_change: Callable[[int], None] | None = None
@@ -644,6 +649,11 @@ class Repository:
             _retire_files(conn, sound_id, publications)
             conn.execute("DELETE FROM sounds WHERE id = ?", (sound_id,))
 
+    def mark_catalog_served(self) -> None:
+        """Remember that some catalog left the App, so grace-only cleanup no longer applies."""
+        with self._write(bump=False) as conn:
+            conn.execute("INSERT OR IGNORE INTO meta VALUES ('catalog_served', '1')")
+
     def acknowledge_catalog(self, revision: int) -> None:
         """Track the greatest served revision without changing the catalog itself."""
         with self._write(bump=False) as conn:
@@ -660,7 +670,11 @@ class Repository:
             )
 
     def cleanup_retired_files(self, remove_file: Callable[[str], None]) -> list[str]:
-        """Reclaim acknowledged publications after a 24-hour retirement grace period.
+        """Reclaim acknowledged publications after the retirement grace period.
+
+        Once any catalog has been served, a retired file waits for the integration to
+        acknowledge the revision that retired it; only an App that never served a catalog
+        (no integration) falls back to the grace period alone.
 
         Hold the write lock through removal so a concurrent publish cannot make a
         candidate current between checking its reference and unlinking the file.
@@ -671,15 +685,21 @@ class Repository:
                 "SELECT value FROM meta WHERE key = 'catalog_revision_acknowledged'"
             ).fetchone()
             acknowledged = int(row[0]) if row is not None else None
+            served = (
+                conn.execute("SELECT 1 FROM meta WHERE key = 'catalog_served'").fetchone()
+                is not None
+            )
             current: set[str] = set()
             for row in conn.execute("SELECT * FROM sounds WHERE published IS NOT NULL"):
                 published = _sound_from_row(row).published
                 if published is not None:
                     current.add(published.filename)
-            cutoff = datetime.now(UTC) - timedelta(hours=24)
+            cutoff = datetime.now(UTC) - RETIREMENT_GRACE
             for retired in conn.execute("SELECT * FROM retired_files").fetchall():
                 filename = retired["filename"]
                 if filename in current:
+                    continue
+                if acknowledged is None and served:
                     continue
                 if acknowledged is not None and retired["retired_at_revision"] > acknowledged:
                     continue
