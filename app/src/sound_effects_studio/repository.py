@@ -18,7 +18,7 @@ import secrets
 import sqlite3
 from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
 from .db import Database
@@ -620,7 +620,9 @@ class Repository:
     def set_published(self, sound_id: str, published: Published) -> Sound:
         """Record a new published revision; the sound becomes ready and its error is cleared."""
         with self._write() as conn:
-            _get_row(conn, "sounds", "Sound", sound_id)
+            sound = _get_sound(conn, sound_id)
+            if sound.published is not None and sound.published.filename != published.filename:
+                _retire_files(conn, sound_id, [sound.published.filename])
             conn.execute(
                 "UPDATE sounds SET published = ?, status = 'ready', error = NULL,"
                 " updated_at = ? WHERE id = ?",
@@ -633,10 +635,60 @@ class Repository:
             _get_row(conn, "sounds", "Sound", sound_id)
             conn.execute("UPDATE sounds SET has_preview = ? WHERE id = ?", (int(value), sound_id))
 
-    def delete_sound(self, sound_id: str) -> None:
+    def delete_sound(self, sound_id: str, filenames: Iterable[str] = ()) -> None:
         with self._write() as conn:
-            _get_row(conn, "sounds", "Sound", sound_id)
+            sound = _get_sound(conn, sound_id)
+            publications = set(filenames)
+            if sound.published is not None:
+                publications.add(sound.published.filename)
+            _retire_files(conn, sound_id, publications)
             conn.execute("DELETE FROM sounds WHERE id = ?", (sound_id,))
+
+    def acknowledge_catalog(self, revision: int) -> None:
+        """Track the greatest served revision without changing the catalog itself."""
+        with self._write(bump=False) as conn:
+            conn.execute(
+                "INSERT INTO meta VALUES ('catalog_revision_acknowledged', ?)"
+                " ON CONFLICT(key) DO UPDATE SET value ="
+                " CAST(MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)",
+                (str(revision),),
+            )
+            conn.execute(
+                "INSERT INTO meta VALUES ('catalog_acknowledged_at', ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (utcnow_iso(),),
+            )
+
+    def cleanup_retired_files(self, remove_file: Callable[[str], None]) -> list[str]:
+        """Reclaim acknowledged publications after a 24-hour retirement grace period.
+
+        Hold the write lock through removal so a concurrent publish cannot make a
+        candidate current between checking its reference and unlinking the file.
+        """
+        removed: list[str] = []
+        with self._write(bump=False) as conn:
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key = 'catalog_revision_acknowledged'"
+            ).fetchone()
+            acknowledged = int(row[0]) if row is not None else None
+            current: set[str] = set()
+            for row in conn.execute("SELECT * FROM sounds WHERE published IS NOT NULL"):
+                published = _sound_from_row(row).published
+                if published is not None:
+                    current.add(published.filename)
+            cutoff = datetime.now(UTC) - timedelta(hours=24)
+            for retired in conn.execute("SELECT * FROM retired_files").fetchall():
+                filename = retired["filename"]
+                if filename in current:
+                    continue
+                if acknowledged is not None and retired["retired_at_revision"] > acknowledged:
+                    continue
+                if datetime.fromisoformat(retired["retired_at"]) >= cutoff:
+                    continue
+                remove_file(filename)
+                conn.execute("DELETE FROM retired_files WHERE filename = ?", (filename,))
+                removed.append(filename)
+        return removed
 
     def bulk_update(self, ids: list[str], data: BulkSet) -> int:
         """Apply metadata changes to many sounds at once; returns how many sounds matched.
@@ -750,3 +802,10 @@ class Repository:
             ],
             "sounds": catalog_sounds,
         }
+
+
+def _retire_files(conn: sqlite3.Connection, sound_id: str, filenames: Iterable[str]) -> None:
+    conn.executemany(
+        "INSERT OR IGNORE INTO retired_files VALUES (?, ?, ?, ?)",
+        [(filename, sound_id, _read_revision(conn) + 1, utcnow_iso()) for filename in filenames],
+    )

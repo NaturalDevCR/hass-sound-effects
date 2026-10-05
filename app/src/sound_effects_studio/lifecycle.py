@@ -89,6 +89,11 @@ async def _clean_up(app: FastAPI) -> None:
         await asyncio.to_thread(app.state.publisher.cleanup_auditions)
     except Exception:
         _LOGGER.exception("Audition cleanup failed")
+    try:
+        await asyncio.to_thread(app.state.publisher.cleanup_retired, app.state.repo)
+        await asyncio.to_thread(app.state.publisher.cleanup_staging)
+    except Exception:
+        _LOGGER.exception("Published file cleanup failed")
     uploads = getattr(app.state, "uploads", None)
     if uploads is None:
         return

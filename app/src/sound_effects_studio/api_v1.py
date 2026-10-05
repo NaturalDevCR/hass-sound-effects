@@ -30,10 +30,13 @@ async def health(request: Request) -> dict[str, str | int]:
 @router.get("/catalog")
 async def catalog(request: Request) -> Response:
     repo: Repository = request.app.state.repo
-    current = _etag(repo.catalog_revision())
+    revision = repo.catalog_revision()
+    current = _etag(revision)
     if _etag_matches(request.headers.get("If-None-Match", ""), current):
+        repo.acknowledge_catalog(revision)
         return Response(status_code=304, headers={"ETag": current})
     document = repo.catalog_document()
+    repo.acknowledge_catalog(cast("int", document["revision"]))
     # Tag the body with the revision it was built from, not the one that is current by now.
     return JSONResponse(document, headers={"ETag": _etag(cast("int", document["revision"]))})
 

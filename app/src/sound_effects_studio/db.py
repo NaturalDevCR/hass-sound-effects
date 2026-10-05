@@ -11,9 +11,12 @@ from pathlib import Path
 
 from .models import Settings
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = (
+    """CREATE TABLE IF NOT EXISTS retired_files (
+        filename TEXT PRIMARY KEY, sound_id TEXT, retired_at_revision INTEGER NOT NULL,
+        retired_at TEXT NOT NULL)""",
     "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
     """CREATE TABLE IF NOT EXISTS seasons (
@@ -96,7 +99,7 @@ class Database:
                 conn.execute(statement)
             if version == 0:
                 _seed(conn)
-                conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
 def _seed(conn: sqlite3.Connection) -> None:

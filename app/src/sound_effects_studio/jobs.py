@@ -227,15 +227,6 @@ class JobQueue:
             revision = (current.published.revision if current.published else 0) + 1
             filename = self._publisher.commit(tmp, sound.id, revision)
             final = self._publisher.published_path(filename)
-            # Retention starts when the previous revision becomes superseded.
-            try:
-                os.utime(self._publisher.published_path(f"{sound.id}-r{revision - 1}.mp3"))
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                _LOGGER.warning(
-                    "Could not refresh retention of %s r%s: %s", sound.id, revision - 1, exc
-                )
             loudness_lufs = true_peak_db = None
             try:
                 measured = await media.measure_loudness(final)
@@ -258,7 +249,8 @@ class JobQueue:
             )
             recorded = True
             try:
-                self._publisher.cleanup(sound.id, keep={revision, revision - 1})
+                self._publisher.cleanup_retired(self._repo)
+                self._publisher.cleanup_staging()
             except OSError:
                 _LOGGER.exception("Could not clean up old revisions for %s", sound.id)
         finally:

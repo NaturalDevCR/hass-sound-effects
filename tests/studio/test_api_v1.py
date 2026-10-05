@@ -524,3 +524,86 @@ def test_a_broken_ui_router_module_is_not_hidden(paths: Paths, monkeypatch: pyte
     monkeypatch.setattr(app_module.importlib, "import_module", broken)
     with pytest.raises(ModuleNotFoundError, match="numpy"):
         create_app(paths, start_background=False)
+
+
+@pytest.mark.parametrize("conditional", [False, True])
+def test_catalog_acknowledges_served_revision(app, client, auth, repo, conditional):
+    revision = repo.catalog_revision()
+    headers = {**auth, "If-None-Match": f'"rev-{revision}"'} if conditional else auth
+    response = client.get("/api/v1/catalog", headers=headers)
+    assert response.status_code == (304 if conditional else 200)
+    meta = dict(app.state.db.connection.execute("SELECT key, value FROM meta"))
+    assert int(meta["catalog_revision_acknowledged"]) == revision
+    assert meta["catalog_acknowledged_at"].endswith("Z")
+    repo.acknowledge_catalog(revision + 1)
+    repo.acknowledge_catalog(revision)
+    meta = dict(app.state.db.connection.execute("SELECT key, value FROM meta"))
+    assert int(meta["catalog_revision_acknowledged"]) == revision + 1
+
+
+@pytest.mark.parametrize("delete", [None, "single", "bulk"])
+def test_cached_catalog_protects_retired_files(app, client, ingress, auth, repo, paths, delete):
+    from datetime import UTC, datetime, timedelta
+
+    sound = publish_sound(repo)
+    filename = sound.published.filename
+    old_file = paths.publish_dir / filename
+    old_file.write_bytes(b"published")
+    original = paths.originals_dir / sound.id
+    original.mkdir()
+    (original / "original.wav").write_bytes(b"original")
+    preview = paths.previews_dir / f"{sound.id}.mp3"
+    preview.write_bytes(b"preview")
+    client.get("/api/v1/catalog", headers=auth)
+    if delete == "single":
+        assert ingress.delete(f"/api/ui/sounds/{sound.id}").status_code == 204
+    elif delete == "bulk":
+        assert (
+            ingress.post("/api/ui/sounds/bulk-delete", json={"ids": [sound.id]}).status_code == 200
+        )
+    else:
+        published = sound.published.model_copy(
+            update={"revision": 2, "filename": f"{sound.id}-r2.mp3"}
+        )
+        (paths.publish_dir / published.filename).write_bytes(b"current")
+        repo.set_published(sound.id, published)
+    if delete:
+        assert not original.exists() and not preview.exists()
+    assert old_file.exists()
+    publisher = app.state.publisher
+    publisher.cleanup_retired(repo)
+    assert old_file.exists()
+    # File mtime is irrelevant: age is measured from retirement, not publication.
+    retired = (datetime.now(UTC) - timedelta(hours=25)).isoformat()
+    app.state.db.connection.execute("UPDATE retired_files SET retired_at = ?", (retired,))
+    publisher.cleanup_retired(repo)
+    assert old_file.exists()
+    client.get("/api/v1/catalog", headers=auth)
+    publisher.cleanup_retired(repo)
+    assert not old_file.exists()
+    assert app.state.db.connection.execute("SELECT COUNT(*) FROM retired_files").fetchone()[0] == 0
+    if not delete:
+        assert (paths.publish_dir / published.filename).exists()
+        # Even a corrupt retirement record must never remove a current publication.
+        app.state.db.connection.execute(
+            "INSERT INTO retired_files VALUES (?, ?, 0, ?)", (published.filename, sound.id, retired)
+        )
+        publisher.cleanup_retired(repo)
+        assert (paths.publish_dir / published.filename).exists()
+
+
+def test_retirement_without_integration_uses_grace_only(app, repo, paths):
+    from datetime import UTC, datetime, timedelta
+
+    sound = publish_sound(repo)
+    file = paths.publish_dir / sound.published.filename
+    file.write_bytes(b"published")
+    repo.delete_sound(sound.id)
+    app.state.publisher.cleanup_retired(repo)
+    assert file.exists()
+    app.state.db.connection.execute(
+        "UPDATE retired_files SET retired_at = ?",
+        ((datetime.now(UTC) - timedelta(hours=25)).isoformat(),),
+    )
+    app.state.publisher.cleanup_retired(repo)
+    assert not file.exists()

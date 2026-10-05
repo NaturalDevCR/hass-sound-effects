@@ -287,11 +287,16 @@ async def test_bulk_atomic_profiles_tags_and_delete(ui, make_tone, paths):
         await client.post("/api/ui/sounds/bulk-delete", json={"ids": [first["id"], "missing"]})
     ).status_code == 404
     assert len(app.state.repo.list_sounds()) == 2
+    publications = {p.name for p in paths.publish_dir.glob("*.mp3")}
     assert (await client.post("/api/ui/sounds/bulk-delete", json={"ids": ids})).json() == {
         "deleted": 2
     }
     assert app.state.repo.list_sounds() == []
-    assert not list(paths.originals_dir.iterdir()) and not list(paths.publish_dir.glob("*.mp3"))
+    assert not list(paths.originals_dir.iterdir())
+    assert {p.name for p in paths.publish_dir.glob("*.mp3")} == publications
+    assert app.state.db.connection.execute("SELECT COUNT(*) FROM retired_files").fetchone()[
+        0
+    ] == len(publications)
 
 
 class FakeSupervisor(SupervisorClient):

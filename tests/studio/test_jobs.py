@@ -259,9 +259,8 @@ async def test_revision_grace_starts_when_superseded(queue, repo, publisher, pat
         assert job.status == "done"
         assert repo.get_sound(sound.id).published.revision == revision
         assert r1.exists()
-    os.utime(r1, (old, old))
-    assert publisher.cleanup(sound.id, keep={2, 3}) == [r1.name]
-    assert not r1.exists()
+    assert publisher.cleanup_retired(repo) == []
+    assert r1.exists()
     assert all((paths.publish_dir / f"{sound.id}-r{n}.mp3").exists() for n in (2, 3))
 
 
