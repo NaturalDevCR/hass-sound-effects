@@ -152,15 +152,15 @@ export type CategoryInput = {
   description?: string;
   default_profile_id?: string | null;
 };
-export type CategoryPatch = Partial<Omit<Category, "id">>;
+export type CategoryPatch = Partial<Omit<Category, "id" | "sort_order">>;
 
 export type SeasonInput = {
   id?: string;
   name: string;
   color?: string;
   icon?: string;
-  start: string | null;
-  end: string | null;
+  start: string;
+  end: string;
   priority?: number;
 };
 export type SeasonPatch = Partial<Omit<Season, "id" | "builtin">>;
