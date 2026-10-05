@@ -105,8 +105,9 @@ Data flow:
   current revision is always kept. Superseded and deleted publications are recorded
   in `retired_files` with the catalog revision that retired them and a retirement
   timestamp. Housekeeping removes them after 24 hours only once the integration
-  acknowledges that catalog revision via a successful `GET /api/v1/catalog`
-  (200 or 304). Without any acknowledgement yet, grace alone applies. Original
+  acknowledges that catalog revision by presenting it as the `If-None-Match`
+  ETag of a later `GET /api/v1/catalog` (proof the integration adopted and
+  persisted it). Without any acknowledgement yet, grace alone applies. Original
   and preview files are removed immediately when a sound is deleted.
 - API token at `/data/api_token` (generated on first start, 32 random bytes,
   URL-safe base64).

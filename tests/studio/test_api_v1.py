@@ -18,7 +18,7 @@ from sound_effects_studio.app import create_app
 from sound_effects_studio.auth import INGRESS_PEER
 from sound_effects_studio.config import Paths
 from sound_effects_studio.errors import ConflictError, InvalidError, NotFoundError
-from sound_effects_studio.models import Published, Recipe, Sound, SoundUpdate
+from sound_effects_studio.models import CategoryCreate, Published, Recipe, Sound, SoundUpdate
 from sound_effects_studio.repository import Repository
 
 pytestmark = pytest.mark.studio
@@ -526,15 +526,43 @@ def test_a_broken_ui_router_module_is_not_hidden(paths: Paths, monkeypatch: pyte
         create_app(paths, start_background=False)
 
 
-@pytest.mark.parametrize("conditional", [False, True])
-def test_catalog_acknowledges_served_revision(app, client, auth, repo, conditional):
-    revision = repo.catalog_revision()
-    headers = {**auth, "If-None-Match": f'"rev-{revision}"'} if conditional else auth
-    response = client.get("/api/v1/catalog", headers=headers)
-    assert response.status_code == (304 if conditional else 200)
+def _acknowledged(app) -> int | None:
     meta = dict(app.state.db.connection.execute("SELECT key, value FROM meta"))
-    assert int(meta["catalog_revision_acknowledged"]) == revision
+    value = meta.get("catalog_revision_acknowledged")
+    return int(value) if value is not None else None
+
+
+def test_an_unconditional_catalog_fetch_acknowledges_nothing(app, client, auth, repo):
+    # The 200 might never reach Home Assistant, so serving it proves nothing.
+    assert client.get("/api/v1/catalog", headers=auth).status_code == 200
+    assert _acknowledged(app) is None
+
+
+def test_catalog_acknowledges_the_revision_the_integration_holds(app, client, auth, repo):
+    held = repo.catalog_revision()
+    repo.create_category(CategoryCreate(name="Newer"))
+    response = client.get("/api/v1/catalog", headers={**auth, "If-None-Match": f'"rev-{held}"'})
+    assert response.status_code == 200
+    assert _acknowledged(app) == held
+    current = repo.catalog_revision()
+    response = client.get(
+        "/api/v1/catalog", headers={**auth, "If-None-Match": f'W/"rev-{current}"'}
+    )
+    assert response.status_code == 304
+    assert _acknowledged(app) == current
+    meta = dict(app.state.db.connection.execute("SELECT key, value FROM meta"))
     assert meta["catalog_acknowledged_at"].endswith("Z")
+
+
+def test_wildcard_or_future_etags_acknowledge_nothing(app, client, auth, repo):
+    future = repo.catalog_revision() + 5
+    for header in ("*", f'"rev-{future}"', '"something-else"'):
+        client.get("/api/v1/catalog", headers={**auth, "If-None-Match": header})
+    assert _acknowledged(app) is None
+
+
+def test_acknowledgement_is_monotonic(app, client, auth, repo):
+    revision = repo.catalog_revision()
     repo.acknowledge_catalog(revision + 1)
     repo.acknowledge_catalog(revision)
     meta = dict(app.state.db.connection.execute("SELECT key, value FROM meta"))
@@ -554,7 +582,9 @@ def test_cached_catalog_protects_retired_files(app, client, ingress, auth, repo,
     (original / "original.wav").write_bytes(b"original")
     preview = paths.previews_dir / f"{sound.id}.mp3"
     preview.write_bytes(b"preview")
-    client.get("/api/v1/catalog", headers=auth)
+    # The integration adopts the catalog that still references the file.
+    held = client.get("/api/v1/catalog", headers=auth).headers["ETag"]
+    assert client.get("/api/v1/catalog", headers={**auth, "If-None-Match": held}).status_code == 304
     if delete == "single":
         assert ingress.delete(f"/api/ui/sounds/{sound.id}").status_code == 204
     elif delete == "bulk":
@@ -578,7 +608,14 @@ def test_cached_catalog_protects_retired_files(app, client, ingress, auth, repo,
     app.state.db.connection.execute("UPDATE retired_files SET retired_at = ?", (retired,))
     publisher.cleanup_retired(repo)
     assert old_file.exists()
-    client.get("/api/v1/catalog", headers=auth)
+    # The newer catalog is served but the response is lost: Home Assistant still holds `held`.
+    newer = client.get("/api/v1/catalog", headers={**auth, "If-None-Match": held})
+    assert newer.status_code == 200
+    publisher.cleanup_retired(repo)
+    assert old_file.exists()
+    # Only when the integration presents the newer ETag has it adopted the newer catalog.
+    adopted = {**auth, "If-None-Match": newer.headers["ETag"]}
+    assert client.get("/api/v1/catalog", headers=adopted).status_code == 304
     publisher.cleanup_retired(repo)
     assert not old_file.exists()
     assert app.state.db.connection.execute("SELECT COUNT(*) FROM retired_files").fetchone()[0] == 0

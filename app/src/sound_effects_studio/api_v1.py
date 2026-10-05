@@ -32,11 +32,15 @@ async def catalog(request: Request) -> Response:
     repo: Repository = request.app.state.repo
     revision = repo.catalog_revision()
     current = _etag(revision)
-    if _etag_matches(request.headers.get("If-None-Match", ""), current):
-        repo.acknowledge_catalog(revision)
+    if_none_match = request.headers.get("If-None-Match", "")
+    # A revision counts as adopted only when the integration presents it back as its ETag:
+    # a 200 that never reached Home Assistant must not let retired files be reclaimed.
+    held = [held for held in _etag_revisions(if_none_match) if held <= revision]
+    if held:
+        repo.acknowledge_catalog(max(held))
+    if _etag_matches(if_none_match, current):
         return Response(status_code=304, headers={"ETag": current})
     document = repo.catalog_document()
-    repo.acknowledge_catalog(cast("int", document["revision"]))
     # Tag the body with the revision it was built from, not the one that is current by now.
     return JSONResponse(document, headers={"ETag": _etag(cast("int", document["revision"]))})
 
@@ -56,6 +60,16 @@ async def selections(request: Request) -> Response:
 
 def _etag(revision: int) -> str:
     return f'"rev-{revision}"'
+
+
+def _etag_revisions(header: str) -> list[int]:
+    """Catalog revisions named by ``"rev-<n>"`` validators in an ``If-None-Match`` header."""
+    revisions: list[int] = []
+    for candidate in header.split(","):
+        value = candidate.strip().removeprefix("W/")
+        if value.startswith('"rev-') and value.endswith('"') and value[5:-1].isdigit():
+            revisions.append(int(value[5:-1]))
+    return revisions
 
 
 def _etag_matches(header: str, etag: str) -> bool:
