@@ -70,3 +70,15 @@ it("shows apply failure inline and retries without PATCHing the saved profile ag
   update.mockRestore();
   apply.mockRestore();
 });
+
+it("names every profile slider and announces the formatted values from the number inputs", async () => {
+  const w = mount(ProfileForm);
+  const sliders = w.findAll('input[type="range"]');
+  expect(sliders.map((s) => s.attributes("aria-label"))).toEqual([
+    "Target loudness (LUFS)", "Peak ceiling (dBTP)", "Loudness range (LU)",
+  ]);
+  expect(sliders.map((s) => s.attributes("aria-valuetext"))).toEqual(["−16.0 LUFS", "−1.5 dBTP", "11.0 LU"]);
+  await w.get('[data-test="true_peak"]').setValue("-2");
+  expect(sliders[1]!.attributes("aria-valuetext")).toBe("−2.0 dBTP");
+  w.unmount();
+});

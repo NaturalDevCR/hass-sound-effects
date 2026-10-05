@@ -27,6 +27,8 @@ const fades = ["fade_in", "fade_out"] as const;
         max="24"
         step="0.5"
         :value="recipe.gain_db"
+        :aria-label="t('editor.gain')"
+        :aria-valuetext="formatDb(recipe.gain_db)"
         class="h-11 w-full cursor-pointer accent-accent"
         @input="emit('change', { gain_db: Number(($event.target as HTMLInputElement).value) })"
         @dblclick="emit('change', { gain_db: 0 })"
@@ -51,6 +53,8 @@ const fades = ["fade_in", "fade_out"] as const;
         :max="fadeMax"
         step="0.01"
         :value="recipe[fade]"
+        :aria-label="t(fade === 'fade_in' ? 'editor.fadeIn' : 'editor.fadeOut')"
+        :aria-valuetext="t('editor.seconds', { n: recipe[fade].toFixed(2) })"
         class="h-11 w-full cursor-pointer accent-accent"
         @input="emit('change', { [fade]: Number(($event.target as HTMLInputElement).value) })"
       />

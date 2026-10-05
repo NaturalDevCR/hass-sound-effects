@@ -116,7 +116,7 @@ async function remove(kind: Tab, value: Category | Season | Profile): Promise<vo
         ><p v-if="loadError" role="alert" class="break-words text-danger">
           {{ loadError }}
         </p>
-        <button type="button" class="btn-primary mt-3" @click="refresh">
+        <button type="button" class="btn-primary mt-3" @click="refresh()">
           {{ t("common.retry") }}
         </button></template
       >

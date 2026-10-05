@@ -43,11 +43,29 @@ async function remove(target: AuditionTarget) {
   list.value = list.value.filter((item) => item.id !== target.id);
   validation.value = null;
 }
+// Home Assistant's entity-id rule, plus the selected domain below.
+const entityId = /^(?!.+__)(?!_)[\da-z_]+(?<!_)\.(?!_)[\da-z_]+(?<!_)$/;
 function submit() {
   if (props.pending) return;
   validation.value = null;
+  const ids = new Set<string>();
   for (const target of list.value) {
-    if (!target.label.trim() || !new RegExp(`^${target.kind}\\.[a-z0-9_]+$`).test(target.entity_id.trim())) {
+    const targetId = target.id.trim();
+    if (!targetId || ids.has(targetId)) {
+      validation.value = t("system.targetIdInvalid");
+      return;
+    }
+    ids.add(targetId);
+    if (!target.label.trim()) {
+      validation.value = t("system.targetLabelInvalid");
+      return;
+    }
+    const entity = target.entity_id.trim();
+    if (
+      !entityId.test(entity) ||
+      (target.kind !== "media_player" && target.kind !== "script") ||
+      entity.split(".")[0] !== target.kind
+    ) {
       validation.value = t("system.targetInvalid", { kind: target.kind });
       return;
     }
@@ -66,6 +84,7 @@ function submit() {
     "save",
     list.value.map((target) => ({
       ...target,
+      id: target.id.trim(),
       label: target.label.trim(),
       entity_id: target.entity_id.trim(),
     })),
@@ -147,6 +166,7 @@ function submit() {
             step="0.01"
             class="min-h-11 w-full accent-accent"
             :aria-label="t('system.volume')"
+            :aria-valuetext="Number(target.volume).toFixed(2)"
           />
           <input
             :id="`${id}-${target.id}-volume`"

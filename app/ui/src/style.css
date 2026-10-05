@@ -26,7 +26,7 @@
   :root {
     color-scheme: dark;
     /* Height of the fixed bottom tab bar (0 on desktop). Fixed UI that must clear it
-       (floating buttons, bulk bars, toasts) uses bottom-[var(--tabbar-h)]. */
+       (floating buttons, bulk bars) uses bottom-[var(--tabbar-h)]. */
     --tabbar-h: calc(3.5rem + env(safe-area-inset-bottom, 0px));
   }
   @media (min-width: 48rem) {

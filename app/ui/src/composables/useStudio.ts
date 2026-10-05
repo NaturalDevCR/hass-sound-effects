@@ -1,6 +1,6 @@
 import { computed, ref } from "vue";
 import { messageOf, ui } from "@/api/client";
-import type { Category, Profile, Season, Sound, State } from "@/api/types";
+import type { Category, Profile, Season, Settings, Sound, State } from "@/api/types";
 
 // Module-level singleton: every component sees the same lists, and a refresh
 // from any view updates all of them.
@@ -21,8 +21,17 @@ const seasonIndex = computed(() => new Map(seasons.value.map((s) => [s.id, s])))
 const profileIndex = computed(() => new Map(profiles.value.map((p) => [p.id, p])));
 
 let inflight: Promise<void> | null = null;
+let trailing: Promise<void> | null = null;
+let settingsVersion = 0;
+
+/** Apply the canonical PUT response before any pending refresh or queued save can use it. */
+function applySettings(settings: Settings): void {
+  settingsVersion += 1;
+  if (state.value) state.value = { ...state.value, settings };
+}
 
 async function load(): Promise<void> {
+  const version = settingsVersion;
   try {
     const [nextState, nextCategories, nextSeasons, nextProfiles, nextSounds] = await Promise.all([
       ui.state(),
@@ -31,7 +40,12 @@ async function load(): Promise<void> {
       ui.profiles.list(),
       ui.sounds.list(),
     ]);
-    state.value = nextState;
+    // Keep other refreshed fields (e.g. the rotated token), but a pre-PUT fetch must
+    // never replace the successful PUT's settings, even if the follow-up fetch fails.
+    state.value =
+      version !== settingsVersion && state.value
+        ? { ...nextState, settings: state.value.settings }
+        : nextState;
     categories.value = nextCategories;
     seasons.value = nextSeasons;
     profiles.value = nextProfiles;
@@ -42,9 +56,7 @@ async function load(): Promise<void> {
   }
 }
 
-/** Reloads everything the views need, in parallel. Never throws: failures land in `error`. */
-function refresh(): Promise<void> {
-  if (inflight) return inflight;
+function fetchStudio(): Promise<void> {
   loading.value = true;
   error.value = null;
   const run = load().finally(() => {
@@ -53,6 +65,22 @@ function refresh(): Promise<void> {
   });
   inflight = run;
   return run;
+}
+
+/**
+ * Reload everything in parallel. Normal callers share the current request; forced
+ * callers wait for it and share one fresh request started after their mutation.
+ * Never throws: failures land in `error`.
+ */
+function refresh(options: { force?: boolean } = {}): Promise<void> {
+  const current = inflight;
+  if (!current) return fetchStudio();
+  if (!options.force) return current;
+  trailing ??= current.then(() => {
+    trailing = null;
+    return inflight ?? fetchStudio();
+  });
+  return trailing;
 }
 
 let inflightSounds: Promise<void> | null = null;
@@ -107,6 +135,7 @@ export function useStudio() {
     loaded,
     error,
     refresh,
+    applySettings,
     refreshSounds,
     categoryById: (id: Id): Category | undefined => (id ? categoryIndex.value.get(id) : undefined),
     seasonById: (id: Id): Season | undefined => (id ? seasonIndex.value.get(id) : undefined),

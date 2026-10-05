@@ -2,6 +2,7 @@
 import { ref, useId, watch } from "vue";
 import { messageOf, ui } from "@/api/client";
 import type { Profile, ProfileUpdateResult } from "@/api/types";
+import { formatDb, formatLufs } from "@/lib/format";
 import { useI18n } from "@/i18n";
 import { useStudio } from "@/composables/useStudio";
 import { useJobs } from "@/composables/useJobs";
@@ -21,9 +22,12 @@ const values = ref({
   lra: props.profile?.lra ?? 11,
 });
 const controls = [
-  { key: "target_lufs", label: "targetLufs", min: -30, max: -5, step: 0.5 },
-  { key: "true_peak", label: "truePeak", min: -9, max: 0, step: 0.1 },
-  { key: "lra", label: "lra", min: 1, max: 20, step: 0.5 },
+  { key: "target_lufs", label: "targetLufs", min: -30, max: -5, step: 0.5, format: formatLufs },
+  {
+    key: "true_peak", label: "truePeak", min: -9, max: 0, step: 0.1,
+    format: (n: number) => formatDb(n).replace("dB", "dBTP"),
+  },
+  { key: "lra", label: "lra", min: 1, max: 20, step: 0.5, format: (n: number) => `${n.toFixed(1)} LU` },
 ] as const;
 const pending = ref(false);
 const error = ref<string | null>(null);
@@ -102,6 +106,7 @@ async function submit(): Promise<void> {
             :max="control.max"
             :step="control.step"
             :aria-label="t(`profile.${control.label}`)"
+            :aria-valuetext="control.format(Number(values[control.key]))"
             :aria-describedby="`${id}-${control.key}-help`"
           />
           <input

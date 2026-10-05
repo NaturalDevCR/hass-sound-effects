@@ -33,7 +33,7 @@ watch(
       <p v-if="loading" role="status">{{ t("common.loading") }}</p>
       <template v-else
         ><p v-if="error" role="alert" class="break-words text-danger">{{ error }}</p>
-        <button class="btn-primary min-h-11! mt-3" @click="refresh">{{ t("common.retry") }}</button></template
+        <button class="btn-primary min-h-11! mt-3" @click="refresh()">{{ t("common.retry") }}</button></template
       >
     </div>
     <div v-else class="grid min-w-0 items-start gap-4 lg:grid-cols-2">

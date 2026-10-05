@@ -26,7 +26,7 @@ const look: Record<ToastKind, { icon: string; tone: string }> = {
       aria-live="polite"
       aria-relevant="additions text"
       data-test="toasts"
-      class="pointer-events-none fixed inset-x-0 bottom-[calc(var(--tabbar-h)+0.75rem)] z-[70] flex flex-col items-center gap-2 px-4 md:inset-x-auto md:right-4 md:bottom-4 md:items-end"
+      class="pointer-events-none fixed inset-x-0 top-[calc(3.5rem+env(safe-area-inset-top,0px)+0.75rem)] z-[70] flex flex-col items-center gap-2 px-4 md:inset-x-auto md:right-4 md:top-auto md:bottom-4 md:items-end"
     >
       <TransitionGroup name="toast">
         <div

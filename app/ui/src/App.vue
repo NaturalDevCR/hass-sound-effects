@@ -65,7 +65,7 @@ onBeforeUnmount(() => jobs.stop());
           <p class="font-semibold text-danger">{{ t("error.title") }}</p>
           <p class="break-words">{{ error }}</p>
         </div>
-        <button type="button" class="btn" :disabled="loading" @click="refresh">{{ t("common.retry") }}</button>
+        <button type="button" class="btn" :disabled="loading" @click="refresh()">{{ t("common.retry") }}</button>
       </div>
 
       <main

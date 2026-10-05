@@ -131,6 +131,34 @@ describe("useStudio", () => {
     expect(mocks.ui.state).toHaveBeenCalledTimes(1);
   });
 
+  it.each([false, true])("forced refresh waits for an in-flight refresh then fetches again (first fails: %s)", async (fails) => {
+    const { useStudio } = await load();
+    const studio = useStudio();
+    const first = deferred<State>();
+    const second = deferred<State>();
+    mocks.ui.state.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const a = studio.refresh();
+    const b = studio.refresh({ force: true });
+    const c = studio.refresh({ force: true });
+    expect(mocks.ui.state).toHaveBeenCalledTimes(1);
+    let settled = false;
+    void b.then(() => (settled = true));
+    if (fails) first.reject(new Error("offline"));
+    else first.resolve(state);
+    await a;
+    await Promise.resolve();
+    expect(mocks.ui.state).toHaveBeenCalledTimes(2);
+    expect(settled).toBe(false);
+    const fresh = { ...state, version: "2.0.0" };
+    second.resolve(fresh);
+    await Promise.all([b, c]);
+    expect(studio.state.value).toEqual(fresh);
+    expect(studio.error.value).toBeNull();
+    expect(studio.loading.value).toBe(false);
+    await studio.refresh({ force: true });
+    expect(mocks.ui.state).toHaveBeenCalledTimes(3);
+  });
+
   it("records the error message instead of throwing, then recovers", async () => {
     const { useStudio, ApiError } = await load();
     mocks.ui.sounds.list.mockRejectedValueOnce(new ApiError(500, "Database is locked"));

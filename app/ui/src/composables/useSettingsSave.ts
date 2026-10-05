@@ -19,9 +19,9 @@ export function useSettingsSave() {
     const run = tail.then(async () => {
       try {
         const settings = await ui.settings.put({ ...studio.state.value!.settings, ...patch });
-        studio.state.value = { ...studio.state.value!, settings };
+        studio.applySettings(settings);
         useToast().push(t("system.saved"), "success");
-        await studio.refresh();
+        await studio.refresh({ force: true });
         success = true;
       } catch (cause) {
         error.value = messageOf(cause);

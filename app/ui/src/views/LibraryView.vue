@@ -154,7 +154,7 @@ const {
           :title="t('library.loadFailed.title')"
           :description="t('library.loadFailed.body')"
         >
-          <button type="button" class="btn-primary" @click="refresh">{{ t("common.retry") }}</button>
+          <button type="button" class="btn-primary" @click="refresh()">{{ t("common.retry") }}</button>
         </EmptyState>
       </div>
 

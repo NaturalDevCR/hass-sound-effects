@@ -27,6 +27,17 @@ describe("ToastStack", () => {
     wrapper.unmount();
   });
 
+  it("keeps phone toasts below the safe-area header and desktop toasts at bottom-right", () => {
+    const wrapper = mountStack();
+    const classes = wrapper.get('[data-test="toasts"]').classes();
+    expect(classes).toContain("top-[calc(3.5rem+env(safe-area-inset-top,0px)+0.75rem)]");
+    expect(classes).toContain("md:top-auto");
+    expect(classes).toContain("md:bottom-4");
+    expect(classes).toContain("md:right-4");
+    expect(classes.filter((c) => c.startsWith("bottom-"))).toEqual([]);
+    wrapper.unmount();
+  });
+
   it("renders toasts inside that region without per-item roles", async () => {
     const wrapper = mountStack();
     const { push } = useToast();
