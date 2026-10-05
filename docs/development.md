@@ -46,11 +46,11 @@ npm --prefix app/ui install
 npm --prefix app/ui run dev
 ```
 
-The Vite dev server proxies `/api` requests to `http://localhost:8099`. The UI source is maintained on a separate branch and may not be present in this checkout.
+The Vite dev server proxies `/api` requests to `http://localhost:8099`. The UI source is included in this repository under `app/ui`.
 
 ## Tests
 
-Python tests are under `tests/studio/`, `tests/integration/` and `tests/contract/`. UI tests run through the verification script when UI sources are present. The project uses pytest, pytest-homeassistant-custom-component, ruff, pyright and OpenAPI validation.
+Python tests are under `tests/studio/`, `tests/integration/` and `tests/contract/`. UI tests and the production build run through the verification script. The project uses pytest, pytest-homeassistant-custom-component, ruff, pyright and OpenAPI validation.
 
 ## Release
 

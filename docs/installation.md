@@ -34,7 +34,7 @@ Use the App's hostname rather than its Ingress URL. The integration checks the c
 
 ## Reconfigure or reauthenticate
 
-To change connection details, open the integration's **Configure** flow and enter the current host, port and token. If the App rejects the saved token, Home Assistant starts a reauthentication flow; reveal/copy the current token in **System → Connection** and submit it. If the App is rediscovered, its current host and token update the existing config entry.
+To change connection details, open the integration entry’s **⋮ → Reconfigure** flow and enter the current host, port and token. If the App rejects the saved token, Home Assistant starts a reauthentication flow; reveal/copy the current token in **System → Connection** and submit it. If the App is rediscovered, its current host and token update the existing config entry.
 
 The integration's options configure the **Public base URL** used by playback devices, an optional **Season entity**, and the catalog **Scan interval** (10–3600 seconds; default 30 seconds).
 

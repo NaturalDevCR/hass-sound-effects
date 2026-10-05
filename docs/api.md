@@ -10,9 +10,9 @@ The v1 HTTP API is the boundary between the Home Assistant integration and Sound
 | `GET /api/v1/catalog` | Retrieve the published catalog: revision, generation time, seasons, categories and sounds with a published revision. | `200` or `304` |
 | `POST /api/v1/selections` | Report selection events so the App can update counters. Body: `{"events":[{"sound_id":"…","category_id":"…","season_id":"…","selected_at":"…"}]}`. | `204` |
 
-Catalog responses include an `ETag` of the form `"rev-<revision>"`. Send it as `If-None-Match`; the App returns `304 Not Modified` when the catalog has not changed. A sound with a previous published revision remains in the catalog while a newer revision is rendering or has failed.
+Catalog responses include an `ETag` of the form `"rev-<revision>"`. Send it as `If-None-Match`; the App returns `304 Not Modified` when the catalog has not changed. A sound with a previous published revision remains in the catalog while a newer revision is rendering or has failed. Every `200` or `304` response acknowledges the served revision in Studio. Superseded and deleted published MP3s are retired; housekeeping removes them only after 24 hours and acknowledgement of the catalog change. If no catalog has ever been acknowledged, the 24-hour grace period alone applies. Current publications are always protected.
 
-Errors use a JSON `detail` message. Invalid or missing bearer credentials return `401` (the contract also documents `403` as unauthorized handling); invalid selection batches can return `422`.
+Errors use a JSON `detail` message. Invalid or missing bearer credentials return `401`; invalid selection batches can return `422`.
 
 ## Supervisor discovery
 

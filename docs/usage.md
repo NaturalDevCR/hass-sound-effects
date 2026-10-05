@@ -46,19 +46,19 @@ Check connection details, discovery status, token, whether `/config/www` can ser
 
 ## Integration entities
 
-The integration provides:
+The integration provides these default English entity IDs (Home Assistant may add a suffix for conflicts, and names can be customized):
 
-- `sensor.sound_effects_active_season`: current season ID, with `name`, `source`, and `color` attributes. Source is `action`, `override`, `entity`, `calendar`, or `default`.
-- `select.sound_effects_season_override`: choose **Auto** or a season name. The choice persists across Home Assistant restarts. In Auto mode, resolution checks an optional configured season entity, then the calendar, then Regular.
-- `sensor.sound_effects_<category_id>_last`: last selected title for that category, with sound ID, key, URL, duration, season, timestamp and current eligible count attributes.
+- `sensor.sound_effects_studio_active_season`: current season ID, with `name`, `source`, and `color` attributes. Source is `override`, `entity`, `calendar`, or `default`. An explicit action season affects only that selection.
+- `select.sound_effects_studio_season_override`: choose **Auto** or a season name. The choice persists across Home Assistant restarts. In Auto mode, resolution checks an optional configured season entity, then the calendar, then Regular.
+- `sensor.sound_effects_studio_<category_name_slug>`: last selected title for that category, with sound ID, key, URL, duration, season, timestamp and current eligible count attributes.
 - `binary_sensor.sound_effects_studio_connected`: diagnostic connectivity status, with catalog revision, last sync and App version attributes.
 
-The optional season entity is configured in integration options. Its state may match a season ID or name, case-insensitively. An explicit `season` passed to `sound_effects.select` has highest priority, followed by the override selector.
+Category sensor IDs are derived from category names, without a `_last` suffix. The optional season entity is configured in integration options. Its state may match a season ID or name, case-insensitively. An explicit `season` passed to `sound_effects.select` has highest priority, followed by the override selector.
 
 ## Tips
 
 - Keep legacy filenames as sound keys when migrating automations that use them for logs or comparisons.
 - Use concise category IDs and consistent lowercase tags.
-- Use the Studio's speaker audition to check media reachability; if speakers cannot reach Home Assistant's default URL, configure a public media base URL in integration options.
+- Use the Studio's speaker audition to check media reachability; if speakers cannot reach Home Assistant's default URL, configure **System → Media base URL** in Studio for auditions. The integration’s **Public base URL** option separately controls URLs returned to automations.
 - If `/config/www` was created after Home Assistant started, restart Home Assistant once so `/local` serves the published files.
 - Use `sound_effects.reset_history` to restart a category's shuffle round, or `sound_effects.refresh` to request a catalog update.
