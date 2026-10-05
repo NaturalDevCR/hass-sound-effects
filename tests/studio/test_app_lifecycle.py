@@ -896,23 +896,6 @@ def test_housekeeping_also_purges_stale_uploads_and_survives_errors(
         assert wait_for(lambda: len(calls) >= 3)
 
 
-def test_housekeeping_awaits_an_asynchronous_purge(
-    paths: Paths, made: list[FastAPI], monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr(lifecycle, "HOUSEKEEPING_INTERVAL", 0.02)
-    app = build(made, paths)
-    finished: list[int] = []
-
-    class Uploads:
-        async def purge_stale(self) -> None:
-            await asyncio.sleep(0)
-            finished.append(len(finished))
-
-    app.state.uploads = Uploads()
-    with TestClient(app):
-        assert wait_for(lambda: len(finished) >= 2)
-
-
 def test_a_slow_core_boot_is_corrected_by_the_periodic_refresh(
     paths: Paths, made: list[FastAPI], monkeypatch: pytest.MonkeyPatch, probe: Probe
 ):

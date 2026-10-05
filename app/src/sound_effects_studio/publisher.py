@@ -13,6 +13,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from .config import Paths
+from .repository import Repository
 
 
 @dataclass
@@ -56,21 +57,11 @@ class Publisher:
     def published_path(self, filename: str) -> Path:
         return self.paths.publish_dir / filename
 
-    def cleanup(
-        self,
-        sound_id: str,
-        keep: set[int],
-        older_than: timedelta = timedelta(hours=24),
-    ) -> list[str]:
+    def cleanup_staging(self, older_than: timedelta = timedelta(hours=24)) -> list[str]:
         cutoff = time.time() - older_than.total_seconds()
-        pattern = re.compile(rf"{re.escape(sound_id)}-r([0-9]+)\.mp3")
         removed: list[str] = []
         for path in _entries(self.paths.publish_dir):
-            match = pattern.fullmatch(path.name)
-            stale_tmp = path.name.startswith(f".tmp-{sound_id}-")
-            if match is None and not stale_tmp:
-                continue
-            if match is not None and int(match[1]) in keep:
+            if not path.name.startswith(".tmp-"):
                 continue
             with suppress(FileNotFoundError):
                 if path.is_file() and path.stat().st_mtime < cutoff:
@@ -78,14 +69,23 @@ class Publisher:
                     removed.append(path.name)
         return removed
 
-    def remove_all(self, sound_id: str) -> None:
-        # Removal ignores age, including files with a future mtime.
+    def cleanup_retired(self, repo: Repository) -> list[str]:
+        def remove(filename: str) -> None:
+            self.published_path(filename).unlink(missing_ok=True)
+
+        return repo.cleanup_retired_files(remove)
+
+    def published_filenames(self, sound_id: str) -> list[str]:
         pattern = re.compile(rf"{re.escape(sound_id)}-r[0-9]+\.mp3")
+        return [
+            path.name for path in _entries(self.paths.publish_dir) if pattern.fullmatch(path.name)
+        ]
+
+    def remove_all(self, sound_id: str) -> None:
+        """Remove sources, previews and staging files; committed publications are retired."""
         for path in _entries(self.paths.publish_dir):
             with suppress(FileNotFoundError):
-                if path.is_file() and (
-                    pattern.fullmatch(path.name) or path.name.startswith(f".tmp-{sound_id}-")
-                ):
+                if path.name.startswith(f".tmp-{sound_id}-") and path.is_file():
                     path.unlink()
         original = self.paths.originals_dir / sound_id
         with suppress(FileNotFoundError):

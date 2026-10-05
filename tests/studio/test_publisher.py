@@ -83,9 +83,8 @@ def test_cleanup_retains_kept_and_recent_files(paths: Paths):
         if name not in {"boo-r4.mp3", ".tmp-boo-new.mp3"}:
             old = time.time() - 25 * 3600
             os.utime(file, (old, old))
-    assert set(publisher.cleanup("boo", keep={2, 3})) == {"boo-r1.mp3", ".tmp-boo-old.mp3"}
+    assert set(publisher.cleanup_staging()) == {".tmp-boo-old.mp3"}
     assert {p.name for p in paths.publish_dir.iterdir() if p.is_file()} == set(names) - {
-        "boo-r1.mp3",
         ".tmp-boo-old.mp3",
     }
 
@@ -125,10 +124,14 @@ def test_storage_usage_and_remove_all(paths: Paths):
     }
     publisher.remove_all("boo")
     assert not original.exists() and not (paths.previews_dir / "boo.mp3").exists()
-    assert {p.name for p in paths.publish_dir.iterdir()} == {"other-r1.mp3", "_audition"}
+    assert {p.name for p in paths.publish_dir.iterdir()} == {
+        "boo-r1.mp3",
+        "other-r1.mp3",
+        "_audition",
+    }
     assert not list((paths.publish_dir / "_audition").iterdir())
     publisher.remove_all("boo")
-    assert publisher.cleanup("boo", set(), timedelta(0)) == []
+    assert publisher.cleanup_staging(timedelta(0)) == []
 
 
 @pytest.mark.parametrize("initialized", [False, True])
@@ -138,7 +141,7 @@ def test_missing_directories_are_harmless(paths, initialized):
         publisher.ensure_dirs()
         for directory in (paths.publish_dir, paths.originals_dir, paths.previews_dir):
             shutil.rmtree(directory)
-    assert publisher.cleanup("boo", set()) == []
+    assert publisher.cleanup_staging() == []
     publisher.remove_all("boo")
     publisher.cleanup_auditions()
     assert publisher.storage_usage() == {
@@ -149,7 +152,7 @@ def test_missing_directories_are_harmless(paths, initialized):
 
 
 @pytest.mark.parametrize(
-    "operation", ["cleanup", "remove_all", "cleanup_auditions", "storage_usage"]
+    "operation", ["cleanup_staging", "remove_all", "cleanup_auditions", "storage_usage"]
 )
 @pytest.mark.parametrize("disappear_at", ["stat", "unlink"])
 def test_disappearing_files_are_harmless(paths, monkeypatch, operation, disappear_at):
@@ -170,8 +173,8 @@ def test_disappearing_files_are_harmless(paths, monkeypatch, operation, disappea
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, disappear_at, disappear)
-    if operation == "cleanup":
-        publisher.cleanup("boo", set())
+    if operation == "cleanup_staging":
+        publisher.cleanup_staging()
     elif operation == "remove_all":
         publisher.remove_all("boo")
     else:

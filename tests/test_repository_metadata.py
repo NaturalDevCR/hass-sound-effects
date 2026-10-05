@@ -18,6 +18,7 @@ def test_hacs_metadata() -> None:
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert hacs["name"] == "Sound Effects"
     assert hacs["content_in_root"] is False
+    assert hacs["homeassistant"] == "2025.12.0"
 
 
 def test_app_manifest_core_fields() -> None:
@@ -27,3 +28,9 @@ def test_app_manifest_core_fields() -> None:
     assert "homeassistant_config:rw" in app_config["map"]
     assert app_config["discovery"] == ["sound_effects"]
     assert "image" not in app_config
+
+
+def test_ui_release_versions_agree() -> None:
+    package = json.loads((ROOT / "app/ui/package.json").read_text())
+    lock = json.loads((ROOT / "app/ui/package-lock.json").read_text())
+    assert package["version"] == lock["version"] == lock["packages"][""]["version"] == "1.0.0"

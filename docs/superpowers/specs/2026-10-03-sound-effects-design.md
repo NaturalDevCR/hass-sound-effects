@@ -101,8 +101,14 @@ Data flow:
 - Originals at `/data/originals/<sound_id>/<original_name>`; never modified.
 - Unpublished render previews at `/data/previews/<sound_id>.mp3`.
 - Published files at `/homeassistant/www/sound-effects/<sound_id>-r<revision>.mp3`.
-  Renaming a sound or category never changes a URL. The current and
-  previous revision are kept; older ones are deleted after 24 hours.
+  Renaming a sound or category never changes a URL. The
+  current revision is always kept. Superseded and deleted publications are recorded
+  in `retired_files` with the catalog revision that retired them and a retirement
+  timestamp. Housekeeping removes them after 7 days only once the integration
+  acknowledges that catalog revision by presenting it as the `If-None-Match`
+  ETag of a later `GET /api/v1/catalog` (proof the integration adopted and
+  persisted it). If the App has never served a catalog, grace alone applies. Original
+  and preview files are removed immediately when a sound is deleted.
 - API token at `/data/api_token` (generated on first start, 32 random bytes,
   URL-safe base64).
 - Home Assistant only serves `/local` when `/config/www` existed at startup.
@@ -160,7 +166,7 @@ the published catalog.
 ### Settings (stored in SQLite, edited in the UI)
 
 - `max_upload_mb` (default 100), `max_duration_s` (default 600).
-- `audition_targets`: list of `{id, label, kind: media_player|script, entity_id, volume?}`.
+- `audition_targets`: list of `{id, label, kind: media_player|script, entity_id, volume?}`. Volume is only supported for script targets and is passed as the `volume` script variable; media-player targets reject a non-null volume. The speakers editor clears volume when switching to a media player, and the audition dialog only displays script volume.
 - `media_base_url`: base URL speakers use to fetch files during auditions.
   Auto-detected on start from the Core config `internal_url`, else from the
   Supervisor primary interface IPv4 and the Core port; overridable in the UI.
@@ -180,11 +186,18 @@ the published catalog.
   the recipe's profile) → `volume=<gain_db>dB` → `afade` in/out → `alimiter`
   at the true-peak ceiling (profile `true_peak`, or −1 dBTP without a
   profile) when `gain_db > 0` or a profile is set.
-- After render: ffprobe duration, ebur128 integrated loudness and true peak.
+- After render: ffprobe duration, loudnorm integrated loudness and true peak.
+  Post-publish measurement, including its internal probe, has a shared timeout
+  of `max(30, 2 * duration)` seconds. Timeout keeps the publication with null
+  loudness and releases the worker.
 - Publish: write to a temp file in the destination directory, validate with
   ffprobe, `os.replace` into the final name, then update the database and
   increment `catalog_revision`. A failed render never touches the published
   file.
+- At worker startup, interrupted `rendering` sounds become `ready` when they
+  have a publication, otherwise `failed` with error `interrupted`. Interrupted
+  `processing` sounds re-enqueue import when their original exists, otherwise
+  become `failed` with error `interrupted`.
 - "Preview render" writes to `/data/previews` and does not publish.
 
 ### Authentication

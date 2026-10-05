@@ -14,7 +14,7 @@ def test_pragmas_and_schema_version(paths: Paths) -> None:
     conn = db.connection
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
     tables = {
         row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
     }
@@ -59,7 +59,7 @@ def test_existing_schema_version_is_left_alone(paths: Paths) -> None:
     raw.commit()
     raw.close()
     reopened = Database(paths.database_path)
-    assert reopened.connection.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert reopened.connection.execute("PRAGMA user_version").fetchone()[0] == 2
     assert reopened.connection.execute("SELECT COUNT(*) FROM profiles").fetchone()[0] == 0
     reopened.close()
 
@@ -69,7 +69,7 @@ def test_newer_schema_version_is_refused_and_connection_closed(
 ) -> None:
     Database(paths.database_path).close()
     raw = sqlite3.connect(paths.database_path)
-    raw.execute("PRAGMA user_version = 2")
+    raw.execute("PRAGMA user_version = 3")
     raw.close()
 
     opened: list[sqlite3.Connection] = []
@@ -88,5 +88,31 @@ def test_newer_schema_version_is_refused_and_connection_closed(
         opened[0].execute("SELECT 1")
     # The refused database is untouched.
     check = real_connect(paths.database_path)
-    assert check.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert check.execute("PRAGMA user_version").fetchone()[0] == 3
     check.close()
+
+
+def test_migrate_v1_preserves_existing_data(paths):
+    Database(paths.database_path).close()
+    raw = sqlite3.connect(paths.database_path)
+    raw.execute("DROP TABLE IF EXISTS retired_files")
+    raw.execute("PRAGMA user_version = 1")
+    raw.execute("UPDATE categories SET name = 'Existing library'")
+    raw.execute("UPDATE meta SET value = '42' WHERE key = 'catalog_revision'")
+    raw.commit()
+    raw.close()
+    db = Database(paths.database_path)
+    try:
+        assert db.connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert (
+            db.connection.execute("SELECT name FROM categories").fetchone()[0] == "Existing library"
+        )
+        assert (
+            db.connection.execute(
+                "SELECT value FROM meta WHERE key = 'catalog_revision'"
+            ).fetchone()[0]
+            == "42"
+        )
+        assert db.connection.execute("SELECT COUNT(*) FROM retired_files").fetchone()[0] == 0
+    finally:
+        db.close()

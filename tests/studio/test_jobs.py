@@ -179,7 +179,7 @@ async def test_import_rejects_long_audio(queue, repo, paths, make_tone):
 
 
 async def test_loudness_failure_does_not_fail_publish(queue, repo, paths, make_tone, monkeypatch):
-    async def fail(_path):
+    async def fail(_path, **kwargs):
         raise media.MediaError("measurement failed")
 
     monkeypatch.setattr(media, "measure_loudness", fail)
@@ -259,9 +259,8 @@ async def test_revision_grace_starts_when_superseded(queue, repo, publisher, pat
         assert job.status == "done"
         assert repo.get_sound(sound.id).published.revision == revision
         assert r1.exists()
-    os.utime(r1, (old, old))
-    assert publisher.cleanup(sound.id, keep={2, 3}) == [r1.name]
-    assert not r1.exists()
+    assert publisher.cleanup_retired(repo) == []
+    assert r1.exists()
     assert all((paths.publish_dir / f"{sound.id}-r{n}.mp3").exists() for n in (2, 3))
 
 
@@ -417,7 +416,7 @@ async def test_cancel_after_commit_removes_unrecorded_revision(
     previous = old.read_bytes()
     entered = asyncio.Event()
 
-    async def paused_measure(_path):
+    async def paused_measure(_path, **kwargs):
         entered.set()
         await asyncio.Event().wait()
 
@@ -554,3 +553,124 @@ async def test_retention_touch_failure_does_not_fail_publish(
     await queue.wait_idle()
     assert job.status == "done"
     assert repo.get_sound(sound.id).published.revision == 2
+
+
+@pytest.mark.parametrize("phase", ["probe", "measurement"])
+async def test_post_publish_timeout_preserves_publish_and_releases_worker(
+    queue, repo, paths, make_tone, monkeypatch, phase
+):
+    real_run = media._run
+    budgets = []
+    stalled = asyncio.Event()
+    recovered = asyncio.Event()
+
+    async def fake_run(*args, timeout=None, timeout_message="subprocess timed out", **kwargs):
+        published = any(
+            re.fullmatch(r"[a-f0-9]+-r\d+\.mp3", os.path.basename(str(arg))) for arg in args
+        )
+        command = media.FFPROBE if phase == "probe" else media.FFMPEG
+        if published and args[0] == command and not recovered.is_set():
+            budgets.append(timeout)
+            stalled.set()
+            try:
+                # Compress the subprocess deadline so the regression runs quickly.
+                await asyncio.wait_for(
+                    asyncio.Event().wait(), None if timeout is None else min(timeout, 0.01)
+                )
+            except TimeoutError as exc:
+                recovered.set()
+                raise media.MediaError(timeout_message) from exc
+        return await real_run(*args, timeout=timeout, timeout_message=timeout_message, **kwargs)
+
+    monkeypatch.setattr(media, "_run", fake_run)
+    first = add_sound(repo, paths, make_tone(name="first.mp3", seconds=1))
+    second = add_sound(repo, paths, make_tone(name="second.mp3", seconds=1))
+    jobs = [queue.enqueue_import(sound.id) for sound in (first, second)]
+    try:
+        await queue.wait_idle(timeout=2)
+        assert stalled.is_set() and recovered.is_set()
+        assert budgets[0] == pytest.approx(30, abs=0.5)
+        assert all(job.status == "done" for job in jobs)
+        published = repo.get_sound(first.id).published
+        assert published is not None and published.loudness_lufs is None
+        assert (paths.publish_dir / published.filename).exists()
+        assert repo.get_sound(second.id).published.loudness_lufs is not None
+    finally:
+        await queue.stop()
+
+
+@pytest.mark.parametrize(
+    "status,existing,has_original",
+    [
+        ("rendering", True, True),
+        ("rendering", False, True),
+        ("processing", False, True),
+        ("processing", False, False),
+    ],
+)
+async def test_start_reconciles_interrupted_jobs(
+    repo, publisher, paths, make_tone, status, existing, has_original
+):
+    from sound_effects_studio.models import Published, utcnow_iso
+
+    sound = add_sound(repo, paths, make_tone(name="interrupted.mp3", seconds=1))
+    if existing:
+        filename = f"{sound.id}-r1.mp3"
+        (paths.publish_dir / filename).write_bytes(b"existing publication")
+        repo.set_published(
+            sound.id,
+            Published(
+                revision=1,
+                filename=filename,
+                duration=1,
+                size=20,
+                loudness_lufs=None,
+                true_peak_db=None,
+                published_at=utcnow_iso(),
+            ),
+        )
+    if not has_original:
+        shutil.rmtree(paths.originals_dir / sound.id)
+    repo.set_status(sound.id, status)
+    queue = JobQueue(repo, publisher, paths)
+    try:
+        await queue.start()
+        await queue.wait_idle()
+        stored = repo.get_sound(sound.id)
+        succeeds = existing or (status == "processing" and has_original)
+        assert stored.status == ("ready" if succeeds else "failed")
+        assert stored.error == (None if succeeds else "interrupted")
+        if status == "processing" and has_original:
+            assert stored.published is not None
+            assert [job.kind for job in queue.list_jobs()] == ["import"]
+        else:
+            assert queue.list_jobs() == []
+        if existing:
+            assert (paths.publish_dir / filename).read_bytes() == b"existing publication"
+    finally:
+        await queue.stop()
+
+
+@pytest.mark.parametrize("duration", [2, 20])
+async def test_post_publish_measurement_budget_scales_with_duration(
+    queue, repo, paths, make_tone, monkeypatch, duration
+):
+    from dataclasses import replace
+
+    real_probe = media.probe
+    budgets = []
+
+    async def fake_probe(path, **kwargs):
+        return replace(await real_probe(path, **kwargs), duration=duration)
+
+    async def measure(path, *, timeout):
+        budgets.append(timeout)
+        return media.LoudnessMeasurement(-16, -1.5, 5, -30, 0)
+
+    monkeypatch.setattr(media, "probe", fake_probe)
+    monkeypatch.setattr(media, "measure_loudness", measure)
+    sound = add_sound(repo, paths, make_tone(name="budget.mp3", seconds=1))
+    job = queue.enqueue_import(sound.id)
+    await queue.wait_idle()
+    assert job.status == "done"
+    assert budgets == [max(30, 2 * duration)]

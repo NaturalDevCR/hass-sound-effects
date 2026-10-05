@@ -193,7 +193,7 @@ async def bulk_delete(data: SoundIds, request: Request) -> dict[str, int]:
         repo.get_sound(sound_id)
     for sound_id in ids:
         _publisher(request).remove_all(sound_id)
-        repo.delete_sound(sound_id)
+        repo.delete_sound(sound_id, _publisher(request).published_filenames(sound_id))
     return {"deleted": len(ids)}
 
 
@@ -227,7 +227,7 @@ async def delete_sound(sound_id: str, request: Request) -> Response:
     repo = _repo(request)
     repo.get_sound(sound_id)
     _publisher(request).remove_all(sound_id)
-    repo.delete_sound(sound_id)
+    repo.delete_sound(sound_id, _publisher(request).published_filenames(sound_id))
     return Response(status_code=204)
 
 
@@ -370,7 +370,7 @@ async def complete_upload(upload_id: str, data: UploadComplete, request: Request
             raise
     except BaseException:
         _publisher(request).remove_all(sound.id)
-        repo.delete_sound(sound.id)
+        repo.delete_sound(sound.id, _publisher(request).published_filenames(sound.id))
         raise
     _jobs(request).enqueue_import(sound.id)
     return sound
@@ -424,7 +424,7 @@ async def import_files(data: ImportCreate, request: Request) -> dict[str, list[S
                 raise
         except BaseException:
             _publisher(request).remove_all(sound.id)
-            repo.delete_sound(sound.id)
+            repo.delete_sound(sound.id, _publisher(request).published_filenames(sound.id))
             raise
         _jobs(request).enqueue_import(sound.id)
         sounds.append(sound)

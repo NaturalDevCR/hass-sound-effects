@@ -18,7 +18,7 @@ import secrets
 import sqlite3
 from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
 from .db import Database
@@ -278,6 +278,11 @@ def _increment_revision(conn: sqlite3.Connection) -> int:
 def _read_revision(conn: sqlite3.Connection) -> int:
     row = conn.execute("SELECT value FROM meta WHERE key = 'catalog_revision'").fetchone()
     return int(row["value"]) if row else 0
+
+
+# Superseded or deleted publications stay on disk this long after retirement, as a
+# safety net for cached catalogs (Home Assistant may fail to persist its snapshot).
+RETIREMENT_GRACE = timedelta(days=7)
 
 
 class Repository:
@@ -620,7 +625,9 @@ class Repository:
     def set_published(self, sound_id: str, published: Published) -> Sound:
         """Record a new published revision; the sound becomes ready and its error is cleared."""
         with self._write() as conn:
-            _get_row(conn, "sounds", "Sound", sound_id)
+            sound = _get_sound(conn, sound_id)
+            if sound.published is not None and sound.published.filename != published.filename:
+                _retire_files(conn, sound_id, [sound.published.filename])
             conn.execute(
                 "UPDATE sounds SET published = ?, status = 'ready', error = NULL,"
                 " updated_at = ? WHERE id = ?",
@@ -633,10 +640,75 @@ class Repository:
             _get_row(conn, "sounds", "Sound", sound_id)
             conn.execute("UPDATE sounds SET has_preview = ? WHERE id = ?", (int(value), sound_id))
 
-    def delete_sound(self, sound_id: str) -> None:
+    def delete_sound(self, sound_id: str, filenames: Iterable[str] = ()) -> None:
         with self._write() as conn:
-            _get_row(conn, "sounds", "Sound", sound_id)
+            sound = _get_sound(conn, sound_id)
+            publications = set(filenames)
+            if sound.published is not None:
+                publications.add(sound.published.filename)
+            _retire_files(conn, sound_id, publications)
             conn.execute("DELETE FROM sounds WHERE id = ?", (sound_id,))
+
+    def mark_catalog_served(self) -> None:
+        """Remember that some catalog left the App, so grace-only cleanup no longer applies."""
+        with self._write(bump=False) as conn:
+            conn.execute("INSERT OR IGNORE INTO meta VALUES ('catalog_served', '1')")
+
+    def acknowledge_catalog(self, revision: int) -> None:
+        """Track the greatest served revision without changing the catalog itself."""
+        with self._write(bump=False) as conn:
+            conn.execute(
+                "INSERT INTO meta VALUES ('catalog_revision_acknowledged', ?)"
+                " ON CONFLICT(key) DO UPDATE SET value ="
+                " CAST(MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER)) AS TEXT)",
+                (str(revision),),
+            )
+            conn.execute(
+                "INSERT INTO meta VALUES ('catalog_acknowledged_at', ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (utcnow_iso(),),
+            )
+
+    def cleanup_retired_files(self, remove_file: Callable[[str], None]) -> list[str]:
+        """Reclaim acknowledged publications after the retirement grace period.
+
+        Once any catalog has been served, a retired file waits for the integration to
+        acknowledge the revision that retired it; only an App that never served a catalog
+        (no integration) falls back to the grace period alone.
+
+        Hold the write lock through removal so a concurrent publish cannot make a
+        candidate current between checking its reference and unlinking the file.
+        """
+        removed: list[str] = []
+        with self._write(bump=False) as conn:
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key = 'catalog_revision_acknowledged'"
+            ).fetchone()
+            acknowledged = int(row[0]) if row is not None else None
+            served = (
+                conn.execute("SELECT 1 FROM meta WHERE key = 'catalog_served'").fetchone()
+                is not None
+            )
+            current: set[str] = set()
+            for row in conn.execute("SELECT * FROM sounds WHERE published IS NOT NULL"):
+                published = _sound_from_row(row).published
+                if published is not None:
+                    current.add(published.filename)
+            cutoff = datetime.now(UTC) - RETIREMENT_GRACE
+            for retired in conn.execute("SELECT * FROM retired_files").fetchall():
+                filename = retired["filename"]
+                if filename in current:
+                    continue
+                if acknowledged is None and served:
+                    continue
+                if acknowledged is not None and retired["retired_at_revision"] > acknowledged:
+                    continue
+                if datetime.fromisoformat(retired["retired_at"]) >= cutoff:
+                    continue
+                remove_file(filename)
+                conn.execute("DELETE FROM retired_files WHERE filename = ?", (filename,))
+                removed.append(filename)
+        return removed
 
     def bulk_update(self, ids: list[str], data: BulkSet) -> int:
         """Apply metadata changes to many sounds at once; returns how many sounds matched.
@@ -687,6 +759,10 @@ class Repository:
         with self._read() as conn:
             rows = conn.execute("SELECT key, value FROM settings").fetchall()
         stored = {row["key"]: json.loads(row["value"]) for row in rows}
+        # Older Studio versions allowed a media-player volume but never applied it.
+        for target in stored.get("audition_targets", []):
+            if target.get("kind") == "media_player":
+                target["volume"] = None
         return Settings.model_validate(
             {k: v for k, v in stored.items() if k in Settings.model_fields}
         )
@@ -750,3 +826,10 @@ class Repository:
             ],
             "sounds": catalog_sounds,
         }
+
+
+def _retire_files(conn: sqlite3.Connection, sound_id: str, filenames: Iterable[str]) -> None:
+    conn.executemany(
+        "INSERT OR IGNORE INTO retired_files VALUES (?, ?, ?, ?)",
+        [(filename, sound_id, _read_revision(conn) + 1, utcnow_iso()) for filename in filenames],
+    )

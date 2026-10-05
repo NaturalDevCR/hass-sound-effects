@@ -11,7 +11,7 @@ import unicodedata
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .errors import InvalidError
 
@@ -285,6 +285,12 @@ class AuditionTarget(BaseModel):
     kind: Literal["media_player", "script"]
     entity_id: str
     volume: float | None = None
+
+    @model_validator(mode="after")
+    def _require_script_volume(self) -> AuditionTarget:
+        if self.kind == "media_player" and self.volume is not None:
+            raise ValueError("volume is only supported for script targets")
+        return self
 
     @field_validator("id", "label")
     @classmethod

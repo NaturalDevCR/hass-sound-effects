@@ -207,3 +207,15 @@ def test_audition_target_rejects_invalid_entity_ids(entity_id: str) -> None:
 def test_audition_target_accepts_valid_entity_ids(entity_id: str) -> None:
     target = AuditionTarget(id="t", label="T", kind="script", entity_id=entity_id)
     assert target.entity_id == entity_id
+
+
+@pytest.mark.parametrize("volume", [0, 0.4, 1])
+def test_media_player_volume_is_rejected(volume):
+    with pytest.raises(ValueError, match="volume is only supported for script targets"):
+        AuditionTarget(
+            id="p",
+            label="Player",
+            kind="media_player",
+            entity_id="media_player.room",
+            volume=volume,
+        )

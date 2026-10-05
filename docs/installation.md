@@ -2,6 +2,8 @@
 
 Sound Effects has two parts: the **Sound Effects Studio** Supervisor App and the **Sound Effects** HACS integration. Install both; the integration reads the App's published catalog.
 
+Requires Home Assistant **2025.12.0 or newer**.
+
 ## Install the Supervisor App
 
 1. In Home Assistant, go to **Settings → Apps → App store**.
@@ -32,7 +34,7 @@ Use the App's hostname rather than its Ingress URL. The integration checks the c
 
 ## Reconfigure or reauthenticate
 
-To change connection details, open the integration's **Configure** flow and enter the current host, port and token. If the App rejects the saved token, Home Assistant starts a reauthentication flow; reveal/copy the current token in **System → Connection** and submit it. If the App is rediscovered, its current host and token update the existing config entry.
+To change connection details, open the integration entry’s **⋮ → Reconfigure** flow and enter the current host, port and token. If the App rejects the saved token, Home Assistant starts a reauthentication flow; reveal/copy the current token in **System → Connection** and submit it. If the App is rediscovered, its current host and token update the existing config entry.
 
 The integration's options configure the **Public base URL** used by playback devices, an optional **Season entity**, and the catalog **Scan interval** (10–3600 seconds; default 30 seconds).
 

@@ -188,7 +188,7 @@ def test_settings_validation_and_media_url_recompute(
                 "label": "Living room",
                 "kind": "media_player",
                 "entity_id": "media_player.living_room",
-                "volume": 0.4,
+                "volume": None,
             },
             {
                 "id": "announce",
@@ -432,3 +432,26 @@ def test_profile_delete_conflicts_with_category_default(ingress: TestClient, rep
     ).json()
     repo.update_category("general", CategoryUpdate(default_profile_id=profile["id"]))
     assert ingress.delete(f"/api/ui/profiles/{profile['id']}").status_code == 409
+
+
+@pytest.mark.parametrize("volume", [0, 0.4, 1])
+def test_media_player_audition_rejects_volume(ingress, volume):
+    base = ingress.get("/api/ui/settings").json()
+    response = ingress.put(
+        "/api/ui/settings",
+        json={
+            **base,
+            "audition_targets": [
+                {
+                    "id": "player",
+                    "label": "Player",
+                    "kind": "media_player",
+                    "entity_id": "media_player.room",
+                    "volume": volume,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 422
+    assert "volume is only supported for script targets" in response.json()["detail"]
+    assert ingress.get("/api/ui/settings").json() == base

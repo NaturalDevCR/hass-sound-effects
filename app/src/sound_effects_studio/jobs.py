@@ -42,6 +42,24 @@ class JobQueue:
 
     async def start(self) -> None:
         if self._worker is None or self._worker.done():
+            queued_sounds = {
+                entry.job.sound_id for entry in self._queued if entry.job.kind != "preview"
+            }
+            for sound in self._repo.list_sounds():
+                if sound.status == "rendering":
+                    ready = sound.published is not None
+                    self._repo.set_status(
+                        sound.id, "ready" if ready else "failed", None if ready else "interrupted"
+                    )
+                elif sound.status == "processing":
+                    original_dir = self._paths.originals_dir / sound.id
+                    if original_dir.is_dir() and any(
+                        path.is_file() for path in original_dir.iterdir()
+                    ):
+                        if sound.id not in queued_sounds:
+                            self.enqueue_import(sound.id)
+                    else:
+                        self._repo.set_status(sound.id, "failed", "interrupted")
             self._worker = asyncio.create_task(self._work(), name="sound-effects-render-worker")
 
     async def stop(self) -> None:
@@ -227,18 +245,9 @@ class JobQueue:
             revision = (current.published.revision if current.published else 0) + 1
             filename = self._publisher.commit(tmp, sound.id, revision)
             final = self._publisher.published_path(filename)
-            # Retention starts when the previous revision becomes superseded.
-            try:
-                os.utime(self._publisher.published_path(f"{sound.id}-r{revision - 1}.mp3"))
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                _LOGGER.warning(
-                    "Could not refresh retention of %s r%s: %s", sound.id, revision - 1, exc
-                )
             loudness_lufs = true_peak_db = None
             try:
-                measured = await media.measure_loudness(final)
+                measured = await media.measure_loudness(final, timeout=max(30, 2 * output.duration))
                 loudness_lufs, true_peak_db = measured.input_i, measured.input_tp
             except media.MediaError:
                 _LOGGER.debug(
@@ -258,7 +267,8 @@ class JobQueue:
             )
             recorded = True
             try:
-                self._publisher.cleanup(sound.id, keep={revision, revision - 1})
+                self._publisher.cleanup_retired(self._repo)
+                self._publisher.cleanup_staging()
             except OSError:
                 _LOGGER.exception("Could not clean up old revisions for %s", sound.id)
         finally:

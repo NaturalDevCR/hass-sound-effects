@@ -9,15 +9,25 @@ const props = defineProps<{ targets: AuditionTarget[]; pending?: boolean; error?
 const emit = defineEmits<{ save: [targets: AuditionTarget[]] }>();
 const { t } = useI18n();
 const id = useId();
-const list = ref<AuditionTarget[]>(props.targets.map((target) => ({ ...target })));
+const copyTarget = (target: AuditionTarget): AuditionTarget => ({
+  ...target, volume: target.kind === "script" ? target.volume : null,
+});
+const list = ref<AuditionTarget[]>(props.targets.map(copyTarget));
 const validation = ref<string | null>(null);
 watch(
   () => props.targets,
   (targets, previous) => {
     // Refreshing another panel must not erase speaker drafts when the saved list is unchanged.
     if (JSON.stringify(targets) !== JSON.stringify(previous))
-      list.value = targets.map((target) => ({ ...target }));
+      list.value = targets.map(copyTarget);
   },
+);
+watch(
+  list,
+  (targets) => {
+    for (const target of targets) if (target.kind === "media_player") target.volume = null;
+  },
+  { deep: true, flush: "sync" },
 );
 function add() {
   list.value.push({
@@ -148,7 +158,7 @@ function submit() {
             {{ t("system.entityHint", { kind: target.kind }) }}
           </p>
         </div>
-        <label class="flex min-h-11 cursor-pointer items-center gap-3 text-sm"
+        <label v-if="target.kind === 'script'" class="flex min-h-11 cursor-pointer items-center gap-3 text-sm"
           ><input
             type="checkbox"
             class="size-5 accent-accent"
@@ -156,7 +166,7 @@ function submit() {
             @change="target.volume = target.volume === null ? 0.5 : null"
           />{{ t("system.setVolume") }}</label
         >
-        <div v-if="target.volume !== null" class="space-y-2">
+        <div v-if="target.kind === 'script' && target.volume !== null" class="space-y-2">
           <label :for="`${id}-${target.id}-volume`" class="block text-sm">{{ t("system.volume") }}</label>
           <input
             v-model.number="target.volume"

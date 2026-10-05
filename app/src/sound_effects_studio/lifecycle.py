@@ -7,7 +7,6 @@ reflected in ``app.state`` so a slow or absent Supervisor can neither block nor 
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -89,13 +88,16 @@ async def _clean_up(app: FastAPI) -> None:
         await asyncio.to_thread(app.state.publisher.cleanup_auditions)
     except Exception:
         _LOGGER.exception("Audition cleanup failed")
+    try:
+        await asyncio.to_thread(app.state.publisher.cleanup_retired, app.state.repo)
+        await asyncio.to_thread(app.state.publisher.cleanup_staging)
+    except Exception:
+        _LOGGER.exception("Published file cleanup failed")
     uploads = getattr(app.state, "uploads", None)
     if uploads is None:
         return
     try:
-        result = await asyncio.to_thread(uploads.purge_stale)
-        if inspect.isawaitable(result):
-            await result
+        await asyncio.to_thread(uploads.purge_stale)
     except Exception:
         _LOGGER.exception("Upload cleanup failed")
 
