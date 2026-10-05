@@ -35,7 +35,7 @@ actions:
       entity_id: media_player.hallway
     data:
       media_content_id: "{{ sound.url }}"
-      media_content_type: "{{ sound.mime_type }}"
+      media_content_type: music
   - delay:
       seconds: "{{ sound.duration }}"
 ```
@@ -72,7 +72,7 @@ actions:
       entity_id: media_player.kitchen
     data:
       media_content_id: "{{ sound.url }}"
-      media_content_type: "{{ sound.mime_type }}"
+      media_content_type: music
 ```
 
 ## Migrate from a hardcoded catalog with fallback
@@ -116,7 +116,7 @@ actions:
       entity_id: media_player.kitchen
     data:
       media_content_id: "{{ sound.url }}"
-      media_content_type: "{{ sound.mime_type | default('audio/mpeg') }}"
+      media_content_type: music
 ```
 
 Home Assistant continues after a failed selection because `continue_on_error` is set. For a production migration, preserve the automation's existing device routing, timing and other playback behavior around the selection change.

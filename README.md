@@ -24,7 +24,21 @@ The App owns audio editing and publishing; the integration owns catalog caching,
 
 ## Screenshots
 
-Screenshots are coming soon: `docs/images/library.png`, `docs/images/editor.png`, and `docs/images/system.png`.
+**Library** — categories, season badges, loudness of every sound and a loudness strip that shows how even a category is:
+
+![Library](docs/images/library.png)
+
+**Editor** — trim on the waveform, gain and fades with live preview, normalization profile, render preview and test on a real speaker:
+
+![Editor](docs/images/editor.png)
+
+**Organize** — categories, seasons with yearly date ranges and normalization profiles:
+
+![Organize](docs/images/organize.png)
+
+**System** — connection to the integration, import of existing files, speakers for testing and storage:
+
+![System](docs/images/system.png)
 
 ## Installation summary
 
@@ -51,7 +65,7 @@ actions:
       entity_id: media_player.hallway
     data:
       media_content_id: "{{ sound.url }}"
-      media_content_type: "{{ sound.mime_type }}"
+      media_content_type: music
 ```
 
 ## Inicio rápido (Español)
