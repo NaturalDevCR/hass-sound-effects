@@ -229,13 +229,15 @@ async def detect_media_base_url(supervisor: SupervisorClient, configured: str) -
         _LOGGER.debug("Core internal_url unavailable: %s", exc)
     try:
         address = _primary_ipv4(await supervisor.network_info())
-        port = (await supervisor.core_info()).get("port")
+        info = await supervisor.core_info()
+        port = info.get("port")
     except SupervisorError as exc:
         _LOGGER.debug("Network detection failed: %s", exc)
         return ""
     if address is None or not isinstance(port, int) or isinstance(port, bool):
         return ""
-    return f"http://{address}:{port}"
+    scheme = "https" if info.get("ssl") is True else "http"
+    return f"{scheme}://{address}:{port}"
 
 
 def _primary_ipv4(network_info: dict[str, object]) -> str | None:

@@ -237,7 +237,7 @@ def build_filter_chain(
 
 
 def can_copy_verbatim(info: ProbeResult, recipe: Recipe) -> bool:
-    return info.codec == "mp3" and recipe.is_identity()
+    return info.format == "mp3" and info.codec == "mp3" and recipe.is_identity()
 
 
 async def render(

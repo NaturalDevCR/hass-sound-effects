@@ -1,7 +1,10 @@
 import json
+import tomllib
 from pathlib import Path
 
 import yaml
+
+from sound_effects_studio import __version__
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -9,9 +12,15 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_versions_agree() -> None:
     manifest = json.loads((ROOT / "custom_components/sound_effects/manifest.json").read_text())
     app_config = yaml.safe_load((ROOT / "app/config.yaml").read_text())
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
     namespace: dict[str, str] = {}
     exec((ROOT / "app/src/sound_effects_studio/__init__.py").read_text(), namespace)
-    assert manifest["version"] == app_config["version"] == namespace["__version__"]
+    assert (
+        manifest["version"]
+        == app_config["version"]
+        == namespace["__version__"]
+        == project["project"]["version"]
+    )
 
 
 def test_hacs_metadata() -> None:
@@ -33,4 +42,4 @@ def test_app_manifest_core_fields() -> None:
 def test_ui_release_versions_agree() -> None:
     package = json.loads((ROOT / "app/ui/package.json").read_text())
     lock = json.loads((ROOT / "app/ui/package-lock.json").read_text())
-    assert package["version"] == lock["version"] == lock["packages"][""]["version"] == "1.0.0"
+    assert package["version"] == lock["version"] == lock["packages"][""]["version"] == __version__

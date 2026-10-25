@@ -83,7 +83,7 @@ async function rotate() {
       return;
     hide();
     await ui.rotateToken();
-    await useStudio().refresh();
+    await useStudio().refresh({ force: true });
     useToast().push(t("system.rotated"), "success");
   });
 }

@@ -60,7 +60,7 @@ async function submit(): Promise<void> {
       saved.value = props.profile
         ? await ui.profiles.update(props.profile.id, body)
         : { profile: await ui.profiles.create(body), affected_sound_ids: [] };
-      await useStudio().refresh();
+      await useStudio().refresh({ force: true });
       useToast().push(t("organize.saved"), "success");
     }
     const { profile, affected_sound_ids } = saved.value;
@@ -75,7 +75,7 @@ async function submit(): Promise<void> {
       const { queued } = await ui.profiles.apply(profile.id, {
         sound_ids: affected_sound_ids,
       });
-      await Promise.all([useStudio().refresh(), useJobs().refresh()]);
+      await Promise.all([useStudio().refresh({ force: true }), useJobs().refresh()]);
       useToast().push(tp("profile.queued", queued), "success");
     }
     emit("saved", profile);

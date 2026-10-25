@@ -117,7 +117,7 @@ async function upload(item: UploadItem, body: UploadDefaults): Promise<void> {
     item.soundId = sound.id;
     item.status = "processing";
     schedule();
-    await Promise.all([useJobs().refresh(), studio.refreshSounds(), studio.refresh()]);
+    await Promise.all([useJobs().refresh(), studio.refreshSounds(), studio.refresh({ force: true })]);
   } catch (cause) {
     item.status = "error";
     item.error = messageOf(cause);

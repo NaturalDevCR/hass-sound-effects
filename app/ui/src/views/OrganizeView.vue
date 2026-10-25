@@ -66,7 +66,7 @@ async function reorder(index: number, delta: number): Promise<void> {
   error.value = null;
   try {
     await ui.categories.reorder(ids);
-    await refresh();
+    await refresh({ force: true });
     announcement.value = t("organize.position", { name: moved.name, n: index + delta + 1, total: ids.length });
   } catch (cause) {
     error.value = messageOf(cause);
@@ -94,7 +94,7 @@ async function remove(kind: Tab, value: Category | Season | Profile): Promise<vo
   error.value = null;
   try {
     await ui[kind].remove(value.id);
-    await refresh();
+    await refresh({ force: true });
     useToast().push(t("organize.deleted"), "success");
   } catch (cause) {
     error.value = messageOf(cause);

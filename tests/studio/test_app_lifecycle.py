@@ -494,6 +494,16 @@ async def test_media_base_url_falls_back_to_the_primary_interface():
     assert await lifecycle.detect_media_base_url(fake.client(), "") == "http://192.168.1.50:8123"
 
 
+@pytest.mark.parametrize("ssl, scheme", [(False, "http"), (True, "https")])
+async def test_media_base_url_fallback_respects_core_ssl(ssl, scheme):
+    routes = network_routes(8443)
+    routes[("GET", "/core/info")] = httpx.Response(200, json={"data": {"port": 8443, "ssl": ssl}})
+    fake = FakeSupervisor(routes=routes)
+    assert await lifecycle.detect_media_base_url(fake.client(), "") == (
+        f"{scheme}://192.168.1.50:8443"
+    )
+
+
 async def test_media_base_url_falls_back_when_core_config_fails():
     routes = network_routes(8124)
     routes[("GET", "/core/api/config")] = httpx.Response(503, text="starting")
