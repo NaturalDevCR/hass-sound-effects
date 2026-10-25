@@ -54,4 +54,4 @@ Python tests are under `tests/studio/`, `tests/integration/` and `tests/contract
 
 ## Release
 
-Release the integration from a version tag named `vX.Y.Z`. Keep its version synchronized with `custom_components/sound_effects/manifest.json`; set the Supervisor App version in `app/config.yaml` to the corresponding release. The current versions are `1.0.0`.
+Release the integration from a version tag named `vX.Y.Z`. Keep its version synchronized with `custom_components/sound_effects/manifest.json`; set the Supervisor App version in `app/config.yaml` to the corresponding release. The current versions are `1.0.1`.

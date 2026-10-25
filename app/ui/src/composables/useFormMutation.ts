@@ -14,7 +14,7 @@ export function useFormMutation() {
     error.value = null;
     try {
       const result = await action();
-      await useStudio().refresh();
+      await useStudio().refresh({ force: true });
       useToast().push(translate("organize.saved"), "success");
       saved(result);
     } catch (cause) {

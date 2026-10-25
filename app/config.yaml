@@ -1,5 +1,5 @@
 name: Sound Effects Studio
-version: 1.0.0
+version: 1.0.1
 slug: sound_effects_studio
 description: Upload, edit, normalize and organize sound effects for Home Assistant
 url: https://github.com/NaturalDevCR/hass-sound-effects

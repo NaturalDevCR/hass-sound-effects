@@ -1,10 +1,12 @@
 """Real media pipeline, queue lifecycle and catalog notification contracts."""
 
 import asyncio
+import json
 import logging
 import os
 import re
 import shutil
+import subprocess
 import threading
 import time
 from collections.abc import AsyncIterator, Iterator
@@ -88,6 +90,55 @@ async def test_import_mp3_identity(queue, repo, paths, make_tone):
     assert (paths.publish_dir / stored.published.filename).read_bytes() == src.read_bytes()
     assert repo.catalog_revision() > revision
     assert not list(paths.publish_dir.glob(".tmp-*"))
+
+
+async def test_import_mp3_in_video_publishes_only_mp3_audio(queue, repo, paths, make_tone):
+    audio = make_tone(seconds=1)
+    video = audio.with_suffix(".mp4")
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=red:size=16x16:duration=1",
+            "-i",
+            str(audio),
+            "-c:v",
+            "mpeg4",
+            "-c:a",
+            "libmp3lame",
+            "-shortest",
+            str(video),
+        ],
+        check=True,
+    )
+    assert (await media.probe(video)).codec == "mp3"
+    sound = add_sound(repo, paths, video)
+    job = queue.enqueue_import(sound.id)
+    await queue.wait_idle()
+    stored = repo.get_sound(sound.id)
+    assert job.status == "done"
+    published = paths.publish_dir / stored.published.filename
+    document = json.loads(
+        subprocess.check_output(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=format_name:stream=codec_type,codec_name",
+                "-of",
+                "json",
+                str(published),
+            ]
+        )
+    )
+    assert document["format"]["format_name"] == "mp3"
+    assert document["streams"] == [{"codec_name": "mp3", "codec_type": "audio"}]
+    assert (paths.originals_dir / sound.id / video.name).read_bytes() == video.read_bytes()
 
 
 async def test_import_wav_with_profile(queue, repo, paths, make_tone):
